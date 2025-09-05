@@ -15,7 +15,7 @@ function forces_ho_with_U(r; return_potential=false)
     return return_potential ? (F, 0.5 * sum(abs2, r)) : F
 end
 nothing
-````
+```
 
 To make [`potential_energy`](@ref) work, support the keyword protocol:
 

@@ -21,10 +21,9 @@ ps = ParticleSystem([0.0 0.0],  # 1×2 positions
 dt = 0.1
 velocity_verlet!(ps, forces, dt)
 ps.positions
-````
+```
 
 ## Harmonic oscillator
-
 ```@example ho
 using Verlet
 
