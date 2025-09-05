@@ -9,20 +9,21 @@ using LinearAlgebra
     @test size(ps.velocities) == (1,2)
     @test ps.masses == [1.0]
 end
+@testset "Velocity Verlet" begin
+    @testset "Velocity Verlet free particle" begin
+        forces(r) = zeros(size(r))
+        ps = ParticleSystem([0.0 0.0], [1.0 0.0], [1.0])
+        velocity_verlet!(ps, forces, 0.1)
+        @test isapprox(ps.positions[1,1], 0.1; atol=1e-12)
+        @test isapprox(ps.velocities[1,1], 1.0; atol=1e-12)
+    end
 
-@testset "Velocity Verlet free particle" begin
-    forces(r) = zeros(size(r))
-    ps = ParticleSystem([0.0 0.0], [1.0 0.0], [1.0])
-    velocity_verlet!(ps, forces, 0.1)
-    @test isapprox(ps.positions[1,1], 0.1; atol=1e-12)
-    @test isapprox(ps.velocities[1,1], 1.0; atol=1e-12)
-end
-
-@testset "Velocity Verlet harmonic oscillator" begin
-    forces(r) = -r
-    ps = ParticleSystem([1.0 0.0], [0.0 0.0], [1.0])
-    velocity_verlet!(ps, forces, 0.1)
-    @test ps.positions[1,1] < 1.0   # should move left
+    @testset "Velocity Verlet harmonic oscillator" begin
+        forces(r) = -r
+        ps = ParticleSystem([1.0 0.0], [0.0 0.0], [1.0])
+        velocity_verlet!(ps, forces, 0.1)
+        @test ps.positions[1,1] < 1.0   # should move left
+    end
 end
 
 @testset "kinetic energy" begin
@@ -129,5 +130,7 @@ end
     @test isfinite(E0) && isfinite(E1)
 end
 
-    # --- Neighbor list tests ---
-    include("test_neighborlist.jl")
+# --- Neighbor list tests ---
+include("test_neighborlist.jl")
+# Cell grid and half neighbor-list acceptance tests
+include("test_cellgrid.jl")

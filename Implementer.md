@@ -26,7 +26,7 @@ julia -e 'import Pkg; Pkg.test()'
 * If you want to run code, you can request the output of shell commands by replying just the command and nothing else. e.g. reply by
 
 ```bash
-julia -e 'import Pkg; Pkg.test()'
+julia -e 'import Pkg; Pkg.activate("."); Pkg.test()'
 ```
 to see if the tests run. You can also inspect the current state of the code by visiting https://github.com/IlianPihlajamaa/Verlet.jl
 

@@ -38,6 +38,8 @@ export ParticleSystem, velocity_verlet!, kinetic_energy, potential_energy
     # Neighbor list + utilities
     export NeighborList, build_neighborlist, maybe_rebuild!, max_displacement_since_build,
                  wrap_positions!
+    # Cell-based grid and half-neighbor-list API (non-breaking additions)
+    export CellGrid, build_cellgrid, rebin!, build_neighborlist_cells
 
 """
     ParticleSystem
@@ -283,6 +285,8 @@ function lj_forces(positions::AbstractMatrix, box::CubicBox;
     return return_potential ? (F, U) : F
 end
 
+include("cellgrid.jl")
+include("neighborlist_cells.jl")
 include("neighborlist.jl")
 
 

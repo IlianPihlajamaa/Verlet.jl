@@ -31,223 +31,201 @@ Will provide the output of the tests. Similarly you can test building the docume
 * Always assume your working directory is the root of the package.
 
 # Design
-# DESIGN.md — Next Feature Plan
+Here’s a **drop-in replacement** for your `Design.md` with the requested edits folded in (half-list emphasis + benchmark guidance + rebuild/skin notes). You can paste this over the current file.
 
-## Overview — Add **Verlet Neighbor List** (O(N) average) for LJ + PBC
+---
 
-With a naive O(N²) Lennard–Jones force kernel and periodic cubic box now in scope, the next high-impact, contained step is a **Verlet neighbor list** (a.k.a. Verlet list) with a **skin** distance. This reduces the per-step force cost to \~O(N) for fixed density, enabling hundreds to thousands of particles at interactive speeds while preserving identical physics.
+# DESIGN.md — Next Feature Plan (revised)
 
-Scope is deliberately tight and orthogonal:
+## Overview — **Cell-Linked Lists (Bins) for O(N) Neighbor Build** + **Half Neighbor Lists**
 
-* A **`NeighborList`** type storing neighbors per particle for a given **cutoff** + **skin**.
-* Builders: `build_neighborlist` (full rebuild) and `maybe_rebuild!` (displacement-based heuristic).
-* A **list-aware LJ kernel**: `lj_forces(R, box, nlist; ...)` that iterates only over neighbors.
-* Light **position wrapping** utility to keep diagnostics sane.
-* Metadata and invariants for correctness & reproducibility.
+We have a working Verlet neighbor list and LJ+PBC kernels. Benchmarks show NL force evaluation overtakes brute force around **N ≈ 256** and scales to **\~46×** at **N = 8192** (ρ=1, rcut=2.5, skin=0.4). However, the **current O(N²) neighbor build** dominates runtime as N grows.
+Next, we add a **cell-linked grid** to make neighbor-list construction **O(N)** and switch the production path to a **half list** (store each pair once), halving memory and removing a branch in the kernel.
 
-No spatial hashing/cell lists yet; that can be a subsequent optimization once the API lands.
+Scope is tight and non-breaking:
+
+* Add `CellGrid` for cubic periodic boxes.
+* Provide `build_cellgrid`, `rebin!`, and `build_neighborlist_cells` (O(N) builder).
+* Emit **half neighbor lists** (pair stored once with `j>i`).
+* Keep existing APIs; the cell-based builder is an alternative to the current O(N²) builder.
 
 ---
 
 ## Public API
 
 ```julia
-# Types
-struct NeighborList{IT<:Integer, T<:Real}
-    cutoff::T       # physical cutoff used for pairs (rcut)
-    skin::T         # additional shell beyond cutoff for list validity
-    pairs::Vector{IT}      # flattened neighbor indices (CSR-style)
-    offsets::Vector{IT}    # length N+1; neighbors for i are pairs[offsets[i]:(offsets[i+1]-1)]
-    ref_positions::Matrix{T}  # copy of positions at last (re)build (N×D)
+struct CellGrid{IT<:Integer, T<:Real}
+    L::T                # box length (CubicBox-compatible)
+    cell_size::T        # typically rlist = cutoff + skin
+    dims::NTuple{3,IT}  # (nx, ny, nz)
+    heads::Vector{IT}   # length = nx*ny*nz; head of linked list per cell (0 = empty)
+    next::Vector{IT}    # length = N; next particle index in cell list (0 = end)
 end
+
+build_cellgrid(R::AbstractMatrix, box::CubicBox; cell_size::Real) -> CellGrid
+rebin!(grid::CellGrid, R::AbstractMatrix, box::CubicBox) -> CellGrid
+
+build_neighborlist_cells(R::AbstractMatrix, box::CubicBox;
+                         cutoff::Real, skin::Real=0.3,
+                         grid::Union{Nothing,CellGrid}=nothing) -> NeighborList
+# Emits a **half list**: each pair appears once with j>i.
 ```
+
+**Exports (add):**
 
 ```julia
-# Construction & maintenance
-build_neighborlist(R::AbstractMatrix, box::CubicBox;
-                   cutoff::Real, skin::Real=0.3) -> NeighborList
-
-maybe_rebuild!(nlist::NeighborList, R::AbstractMatrix, box::CubicBox) -> Bool
-# Returns true if a rebuild was performed (max displacement ≥ skin/2), false otherwise.
-
-max_displacement_since_build(nlist::NeighborList, R::AbstractMatrix, box::CubicBox) -> Float64
+export CellGrid, build_cellgrid, rebin!, build_neighborlist_cells
 ```
 
-```julia
-# Force kernels
-lj_forces(R::AbstractMatrix, box::CubicBox, nlist::NeighborList;
-          ϵ::Real=1.0, σ::Real=1.0, shift::Bool=false, return_potential::Bool=false)
-
-# Overload without nlist uses O(N²) reference implementation (already planned/added).
-```
-
-```julia
-# Utilities
-wrap_positions!(R::AbstractMatrix, box::CubicBox) -> R  # Wrap each coordinate into (-L/2, L/2]
-```
-
-**Exports (suggested):**
-
-```julia
-export NeighborList, build_neighborlist, maybe_rebuild!, max_displacement_since_build,
-       wrap_positions!
-```
-
-(Keep `lj_forces` exported as already planned; method with `NeighborList` is additional multiple dispatch.)
+Existing exports for `NeighborList`, `build_neighborlist`, `maybe_rebuild!`, `max_displacement_since_build`, `wrap_positions!` remain unchanged.
 
 ---
 
 ## Data Structures
 
 ```julia
-struct NeighborList{IT<:Integer, T<:Real}
-    cutoff::T
-    skin::T
-    pairs::Vector{IT}      # concatenated neighbor indices (1-based)
-    offsets::Vector{IT}    # CSR offsets; length = N+1
-    ref_positions::Matrix{T}  # N×D snapshot at last build (Float64 default)
+struct CellGrid{IT<:Integer, T<:Real}
+    L::T
+    cell_size::T                     # enforce cell_size ≤ rlist internally
+    dims::NTuple{3,IT}               # ≥ (1,1,1)
+    heads::Vector{IT}                # 1-based indices; 0 sentinel
+    next::Vector{IT}
 end
 ```
 
-* **CSR layout** provides cache-friendly iteration and compact storage.
-* `ref_positions` is used to track the **maximum particle displacement** since build (via minimum-image deltas), enabling cheap rebuild decisions.
-* Use `Float64` internally for distances even if `R` is `Float32`, to keep numerical stability.
+* Linked list per cell avoids allocations during binning.
+* `dims = max(1, floor(Int, L/cell_size))` per axis; clamp so `cell_size ≤ rlist`.
+* Neighbor search visits the **27 neighboring cells** with periodic wrap.
 
 ---
 
 ## Algorithms
 
-### A. Building the neighbor list (naive O(N²) pass, still fast and simple)
+### A) Build / Rebin Grid — O(N)
 
-Inputs: `R (N×D)`, `box`, `cutoff`, `skin`. Let `rlist = cutoff + skin`.
+1. Compute `(nx,ny,nz)` from `L` and `cell_size`.
+2. Zero `heads` (length `nx*ny*nz`) and `next` (length `N`).
+3. For each particle `i`, map position to **\[0,L)** then to `(cx,cy,cz)`, linearize to cell id `c`, and push-front: `next[i]=heads[c]; heads[c]=i`.
 
-1. Precompute `rlist²`.
-2. Allocate temporary `Vector{Vector{Int}} neighs(N)`.
-3. For `i=1..N-1`, `j=i+1..N`:
+### B) Build Half Neighbor List from Cells — O(N) at fixed density
 
-   * `Δ = R[i,:] - R[j,:]`; `minimum_image!(Δ, box)`.
-   * If `dot(Δ,Δ) ≤ rlist²`: push `j` into `neighs[i]` and `i` into `neighs[j]`.
-4. Convert `neighs` to CSR:
+* `rlist = cutoff + skin`, precompute `rlist²`.
+* For each cell and particle `i` in it:
 
-   * `offsets[1]=1`, `offsets[i+1]=offsets[i]+length(neighs[i])`.
-   * Write neighbors into `pairs`.
-5. Store `ref_positions = copy(R)`.
+  * For each of the 27 neighbor cells:
 
-This is a **one-time** or **infrequent** O(N²) step; per-step forces will be O(total neighbors) ≈ O(N).
+    * For each particle `j` in that cell: **skip if `j ≤ i`** (enforce half list).
+    * Compute minimum-image `Δ`; if `‖Δ‖² ≤ rlist²`, record `(i,j)`.
+* Assemble CSR: first pass counts → `offsets` (N+1), second pass fills `pairs`.
+* Store `ref_positions = copy(R)`.
 
-### B. Rebuild heuristic (classic half-skin rule)
+### C) List-aware LJ Kernel (half list)
 
-* Track **maximum** minimum-image displacement per particle since `ref_positions`.
-* If `max_disp ≥ skin/2`, **rebuild** the list (`build_neighborlist`) and update `ref_positions`.
-* Else keep using the list.
-
-`maybe_rebuild!` implements this.
-
-### C. List-aware LJ kernel
-
-For each particle `i`:
+Update the NL LJ kernel to **assume each pair appears once (half list)**. Remove runtime `j>i` checks and accumulate both particles’ forces in a single visit:
 
 ```
-Fi = 0
-for j in neighbors(i):  # CSR via offsets/pairs
+for i in 1:N
+  for idx in offsets[i]:(offsets[i+1]-1)
+    j = pairs[idx]  # j > i guaranteed by builder
     Δ = R[i,:] - R[j,:]; minimum_image!(Δ, box)
     r2 = dot(Δ,Δ)
-    if r2 <= cutoff^2
+    if r2 ≤ cutoff^2
         invr2 = 1/r2
-        s2 = (σ^2) * invr2
+        s2 = (σ^2)*invr2
         s6 = s2^3
         fr_over_r = 24*ϵ*(2*s6^2 - s6)*invr2
         Fi += fr_over_r * Δ
-        Fj -= fr_over_r * Δ  # enforce Newton-3rd; do once (i<j policy)
-        U += 4*ϵ*(s6^2 - s6) - (shift ? Uc : 0)
+        Fj -= fr_over_r * Δ
+        U  += 4*ϵ*(s6^2 - s6) - (shift ? Uc : 0)
     end
+  end
+end
 ```
 
-* Use **i\<j** policy when walking neighbors to avoid double-counting; for CSR we can either:
+### D) Rebuild Policy
 
-  * Build **symmetric** neighbor lists but apply interaction only when `i<j`, or
-  * Build **half lists** (store each pair once). For simplicity & predictable cache patterns, we’ll use **symmetric lists + `if j>i` guard** in the first version.
-
-### D. Position wrapping
-
-`wrap_positions!` maps each coordinate of each particle to `(-L/2, L/2]`. This is **not required** by the kernel (since we minimum-image displacements), but improves debuggability and ensures `max_displacement_since_build` remains well-behaved.
+Keep `maybe_rebuild!` (half-skin rule) unchanged. With O(N) builds, users can safely reduce `skin` to improve fidelity without large rebuild penalties.
 
 ---
 
 ## Numerical Pitfalls
 
-* **Skin too small → frequent rebuilds** and potential missed pairs if particles cross the shell before rebuild. Default `skin=0.3σ` is a reasonable start; users should tune by temperature/density.
-* **Precision**: Accumulate forces and energy in `Float64`. Displacement tracking must use minimum-image deltas to avoid spuriously large displacements across boundaries.
-* **List symmetry & Newton’s third law**: If symmetric lists are used, ensure pair is applied once (e.g., `j>i`) or apply twice with half force—prefer the former.
-* **Cutoff consistency**: The list uses `rlist = cutoff + skin`, but the **force** uses `cutoff` exactly. If `shift=true`, compute `Uc = U(cutoff)` (not at `rlist`).
-* **Degenerate boxes**: Require `L > 2*(cutoff+skin)`; otherwise minimum-image is ambiguous and the neighbor shell spans the box.
+* **Cell size**: enforce `cell_size ≤ rlist` or you risk missing pairs across cells.
+* **Tiny boxes / low dims**: `dims` can be `(1,1,1)` → degenerates to O(N²) inside one cell (correct but slower).
+* **Precision**: use `Float64` for distance math and accumulators.
+* **Geometry guard**: recommend `L > 2*(cutoff+skin)` to avoid ambiguous minimum-image shells.
+* **Half-list invariants**: kernel must not double-count; builder guarantees `j>i`.
 
 ---
 
 ## Acceptance Tests
 
-Add these to `test/test_neighborlist.jl` and include from `runtests.jl`.
+Add `test/test_cellgrid.jl` and include it from `test/runtests.jl`.
 
 ```julia
-using Test, LinearAlgebra, Verlet
-
-@testset "NeighborList construction and invariants" begin
-    N, D = 10, 3
-    L = 8.0
+@testset "CellGrid build and rebin invariants" begin
+    N, D = 100, 3
+    L = 12.0
     box = CubicBox(L)
-    R = randn(N, D)
+    R = rand(N, D) .* L .- (L/2)
     wrap_positions!(R, box)
 
-    cutoff = 2.5
-    skin   = 0.4
-    nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
+    rcut, skin = 2.5, 0.4
+    rlist = rcut + skin
 
-    # Offsets form valid CSR
-    @test length(nlist.offsets) == N + 1
-    @test first(nlist.offsets) == 1
-    @test last(nlist.offsets) == length(nlist.pairs) + 1
+    grid = build_cellgrid(R, box; cell_size=rlist)
+    @test grid.L == L
+    @test all(x -> x ≥ 1, grid.dims)
+    @test length(grid.next) == N
+    @test length(grid.heads) == prod(grid.dims)
 
-    # All neighbor pairs within rlist
+    rebin!(grid, R, box)
+    @test length(grid.next) == N
+end
+
+@testset "Cell-based neighbor list ≡ naive rlist filter (half list)" begin
+    N, D = 128, 3
+    L = 15.0
+    box = CubicBox(L)
+    R = rand(N, D) .* L .- (L/2)
+    wrap_positions!(R, box)
+
+    cutoff, skin = 2.2, 0.5
+    nlist = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin)
+
     rlist2 = (cutoff + skin)^2
+    ref_pairs = Vector{Tuple{Int,Int}}()
+    for i in 1:N-1, j in i+1:N
+        Δ = @view R[i,:] .- R[j,:]
+        minimum_image!(Δ, box)
+        if dot(Δ,Δ) ≤ rlist2 + 1e-12
+            push!(ref_pairs, (i,j))
+        end
+    end
+    sort!(ref_pairs)
+
+    got = Vector{Tuple{Int,Int}}()
     for i in 1:N
         for idx in nlist.offsets[i]:(nlist.offsets[i+1]-1)
             j = nlist.pairs[idx]
-            Δ = @view R[i,:] .- R[j,:]
-            minimum_image!(Δ, box)
-            @test dot(Δ,Δ) <= rlist2 + 1e-12
+            @test j > i
+            push!(got, (i,j))
         end
     end
+    sort!(got)
+    @test got == ref_pairs
 end
 
-@testset "maybe_rebuild! triggers on half-skin" begin
-    N, D = 5, 3
-    L = 10.0
-    box = CubicBox(L)
-    R = zeros(N, D)
-    cutoff, skin = 2.0, 0.6
-    nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
-
-    # Move one particle by < skin/2 : no rebuild
-    R[1,1] += 0.25  # < 0.3
-    @test maybe_rebuild!(nlist, R, box) == false
-
-    # Cross skin/2 : triggers rebuild
-    R[1,1] += 0.1  # now 0.35 > 0.3
-    @test maybe_rebuild!(nlist, R, box) == true
-end
-
-@testset "LJ forces with NeighborList match O(N²) reference" begin
-    N, D = 24, 3
+@testset "LJ with half list from cells matches brute force" begin
+    N, D = 64, 3
     L = 12.0
     box = CubicBox(L)
-    R = rand(N, D) .* (L/2) .- (L/4)
+    R = rand(N, D) .* L .- (L/2)
     wrap_positions!(R, box)
 
     ϵ, σ, cutoff, skin = 1.0, 1.0, 2.5, 0.4
-    # Build list with rlist = cutoff + skin
-    nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
+    nlist = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin)
 
-    # Reference (brute-force) and list-aware comparisons
     F_ref, U_ref = lj_forces(R, box; ϵ=ϵ, σ=σ, rcut=cutoff, return_potential=true)
     F_nl,  U_nl  = lj_forces(R, box, nlist; ϵ=ϵ, σ=σ, shift=false, return_potential=true)
 
@@ -255,81 +233,62 @@ end
     @test isapprox(U_nl,  U_ref; atol=1e-10, rtol=1e-10)
 end
 
-@testset "NeighborList stays valid under small motion; rebuild changes content" begin
-    N, D = 16, 3
-    L = 10.0
+@testset "Rebin + maybe_rebuild! integration" begin
+    N, D = 80, 3
+    L = 14.0
     box = CubicBox(L)
     R = rand(N, D) .* L .- (L/2)
-    cutoff, skin = 2.2, 0.6
-    nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
-
-    pairs_before = copy(nlist.pairs)
-    offsets_before = copy(nlist.offsets)
-
-    # Small random motion below half-skin → no rebuild
-    R .+= 0.1 .* randn(N, D)
     wrap_positions!(R, box)
-    @test maybe_rebuild!(nlist, R, box) == false
-    @test nlist.pairs == pairs_before
-    @test nlist.offsets == offsets_before
 
-    # Larger motion → rebuild likely alters neighbor graph
-    R .+= 0.4 .* randn(N, D) # push beyond skin/2
-    wrap_positions!(R, box)
-    did = maybe_rebuild!(nlist, R, box)
-    @test did == true
-end
-
-@testset "wrap_positions! maps coords to (-L/2, L/2]" begin
-    box = CubicBox(5.0)
-    R = [ 3.1 -2.6; -4.9 4.9 ]
-    wrap_positions!(R, box)
-    @test all(-box.L/2 .< R) && all(R .<= box.L/2)
-end
-
-@testset "Energy shift at cutoff is preserved with NeighborList" begin
-    L = 30.0; box = CubicBox(L)
-    R = [0.0 0.0 0.0; 2.0 0.0 0.0]
     cutoff, skin = 2.5, 0.4
-    nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
-    F1, U1 = lj_forces(R, box, nlist; rcut=cutoff, shift=true, return_potential=true)
-    R2 = [0.0 0.0 0.0; 2.51 0.0 0.0]
-    nlist2 = build_neighborlist(R2, box; cutoff=cutoff, skin=skin)
-    F2, U2 = lj_forces(R2, box, nlist2; rcut=cutoff, shift=true, return_potential=true)
-    @test isapprox(norm(F2), 0.0; atol=1e-12)
-    @test U2 ≈ 0.0 atol=1e-10
-    @test U1 < 0.0
+    grid = build_cellgrid(R, box; cell_size=cutoff+skin)
+    nlist = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
+
+    R .+= 0.1 .* randn(N, D); wrap_positions!(R, box)
+    @test maybe_rebuild!(nlist, R, box) == false
+
+    R .+= 0.35 .* randn(N, D); wrap_positions!(R, box)
+    if maybe_rebuild!(nlist, R, box)
+        rebin!(grid, R, box)
+        nlist2 = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
+        @test length(nlist2.pairs) > 0
+    end
 end
 ```
 
 ---
 
-## Implementation Notes (for the implementer)
+## Benchmark Guidance (documentation, not a test)
 
-* Put neighbor-list code in `src/neighborlist.jl`; `include` from `src/Verlet.jl`.
-* Default `skin=0.3` (in units of `σ`, but **do not** couple to `σ` in code; just a numeric default).
-* Keep allocations minimal in the LJ kernel by reusing a `Δ::Vector{Float64}` scratch.
-* In `maybe_rebuild!`, compute per-particle displacement as `norm(minimum_image!(R[i,:] - ref_positions[i,:], box))` and track the maximum.
-* Add `wrap_positions!` to `src/box.jl` (or alongside `CubicBox`).
+* At **ρ≈1, D=3, rcut=2.5, skin=0.4**:
+
+  * NL force evaluation overtakes O(N²) at **N≈256**.
+  * Speedup grows with N: \~3× (512), \~6× (1024), \~23× (4096), \~46× (8192).
+* With **O(N) builds**, you may reduce **skin** (e.g., 0.2–0.3) to improve force accuracy without paying a quadratic rebuild cost.
+
+---
+
+## Implementation Notes
+
+* Files:
+
+  * `src/cellgrid.jl`: `CellGrid`, `build_cellgrid`, `rebin!`, helpers (`cell_index`, periodic wrap).
+  * `src/neighborlist_cells.jl`: `build_neighborlist_cells` (emits **half list**).
+  * `include` both from `src/Verlet.jl`; add exports listed above.
+* Ensure **half list** throughout: the cell builder guarantees `j>i`; update the NL LJ kernel to **not** branch on `j>i`.
+* Keep distance math and accumulators in `Float64`.
+* Enforce `cell_size ≤ rlist` inside `build_cellgrid` to preserve correctness.
 
 ---
 
 ## Task for Implementer (small & focused)
 
-1. **Add types & functions**:
+1. Implement `CellGrid`, `build_cellgrid`, and `rebin!` (O(N) binning) in `src/cellgrid.jl`.
+2. Implement `build_neighborlist_cells` that:
 
-   * `NeighborList`, `build_neighborlist`, `maybe_rebuild!`, `max_displacement_since_build`, `wrap_positions!`.
-   * Extend `lj_forces` with a method that accepts `(R, box, nlist; ...)` and iterates neighbors (respecting `j>i` to avoid double counting).
-2. **Exports**: as suggested above.
-3. **Tests**: create `test/test_neighborlist.jl` with the acceptance tests and `include("test_neighborlist.jl")` from `test/runtests.jl`.
-4. **Docs**: a short section “Speeding up LJ with a Neighbor List” showing:
-
-   ```julia
-   box = CubicBox(20.0)
-   nlist = build_neighborlist(R, box; cutoff=2.5, skin=0.4)
-   maybe_rebuild!(nlist, R, box) && @info "rebuilt"
-   F = lj_forces(R, box, nlist; rcut=2.5)
-   ```
-5. **(Optional)**: add a micro-benchmark in `bench/` comparing O(N²) vs neighbor list at N≈128–512.
-
-Once this lands and `lj_forces` (brute-force) is in place, we can consider **cell lists** for O(N) builds and **time-correlated rebuild heuristics** as the next iteration.
+   * Uses 27-cell sweep with periodic wrap,
+   * Emits a **half list** with `j>i`,
+   * Returns a valid CSR `NeighborList` with `ref_positions = copy(R)`.
+3. Update `src/Verlet.jl` to include new files and exports.
+4. Add `test/test_cellgrid.jl` with the Acceptance Tests and include from `test/runtests.jl`.
+5. (Optional) Add `bench/bench_cellgrid_build.jl` to compare O(N²) vs O(N) builds at N∈{256,512,1024,2048}.

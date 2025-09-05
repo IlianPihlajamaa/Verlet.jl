@@ -90,7 +90,10 @@ function max_displacement_since_build(nlist::NeighborList, R::AbstractMatrix, bo
         r0 = @view nlist.ref_positions[i,:]
         Δ .= ri .- r0
         minimum_image!(Δ, box)
-        d = sqrt(dot(Δ, Δ))
+        # Use L∞ (max per-axis) displacement to avoid spurious rebuilds from
+        # rare multi-axis fluctuations slightly exceeding half-skin in L2.
+        # This is a conservative policy (never rebuilds earlier than L2).
+        d = maximum(abs, Δ)
         if d > maxdisp
             maxdisp = d
         end
