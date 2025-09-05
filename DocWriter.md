@@ -24,9 +24,9 @@ cat src/filename.jl
 * If you want to run any code reply only with a bash command:
 
 ```bash
-julia -e 'import Pkg; Pkg.test()'
+julia --project=docs -e 'import Pkg; Pkg.activate("docs"); Pkg.instantiate(); include("docs/make.jl")
 ```
-Will provide the output of the tests. Similarly you can test building the documentation, and inspect the code.
+Will build the docs. Similarly you can inspect the code.
 
 * Always assume your working directory is the root of the package.
 

@@ -23,9 +23,29 @@ struct CellGrid{IT<:Integer,T<:Real}
     heads::Vector{IT}     # length = nx*ny*nz; 0 sentinel = empty
     next::Vector{IT}      # length = N; next particle index in the cell list (0 = end)
 end
+"""
+    CellGrid{IT<:Integer, T<:Real}
 
-# -- Helpers ------------------------------------------------------------------
+Linked-list **cell grid** for cubic periodic boxes. The domain is split into a
+uniform `dims = (nx,ny,nz)` grid of cubic cells with an **intrusive linked list**
+(`heads`, `next`) storing particle indices in each cell. This enables **O(N)**
+rebinning at fixed density and powers the O(N) neighbor build.
 
+# Fields
+- `L::T`: cubic box length.
+- `cell_size::T`: **effective** uniform cell width actually used for binning.
+- `dims::NTuple{3,IT}`: number of cells along each axis (each ≥ 1).
+- `heads::Vector{IT}`: length `nx*ny*nz`; head index per cell (`0` sentinel = empty).
+- `next::Vector{IT}`: length `N`; linked list “next” pointer per particle (`0` = end).
+
+!!! tip "How `cell_size` is chosen"
+    `build_cellgrid` computes `nx = floor(Int, L/cell_size)` and then uses the
+    **effective** width `L/nx` for indexing so that a 27-cell sweep is sufficient
+    for a search radius ≤ `cell_size`.
+
+!!! warning "Units"
+    `R` and `L` must be expressed in the **same length units**.
+"""
 @inline function _box_length(box)
     # Expect a field `L` (CubicBox(L)), fall back to `getproperty`.
     try

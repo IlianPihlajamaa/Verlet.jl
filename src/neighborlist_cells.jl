@@ -62,7 +62,7 @@ end
 end
 
 """
-    build_neighborlist_cells(R, box; cutoff, skin=0.3, grid=nothing)
+    build_neighborlist_cells(R, box; cutoff, skin=0.3, grid=nothing) -> NeighborList-like
 
 Construct a **half neighbor list** (each pair appears exactly once with j>i) using
 an O(N) cell-linked grid build. Returns an object with `.offsets` and `.pairs`
@@ -193,6 +193,9 @@ const _PARENT = Base.parentmodule(@__MODULE__)
     function max_displacement_since_build(nl::__NLCellsInternal__.HalfNeighborList,
                                           R::AbstractMatrix, box)
         N, D = size(R)
+    # Docstring is attached to the public NeighborList method; here we mirror
+    # the semantics so that `maybe_rebuild!` works identically for cell lists.
+    # We use the same minimum-image convention as in the rest of the package.
         @assert size(nl.ref_positions) == (N, D)
         Δ = zeros(eltype(nl.ref_positions), D)
         maxd2 = 0.0
@@ -215,6 +218,9 @@ const _PARENT = Base.parentmodule(@__MODULE__)
 
     function maybe_rebuild!(nl::__NLCellsInternal__.HalfNeighborList,
                             R::AbstractMatrix, box)
+    # Classic half-skin rule (rebuild when max displacement > skin/2).
+    # With O(N) builds you can safely choose a smaller skin (e.g. 0.2–0.3)
+    # to tighten force errors without paying quadratic rebuild costs.
         return max_displacement_since_build(nl, R, box) > (nl.skin / 2)
     end
 
@@ -222,6 +228,9 @@ const _PARENT = Base.parentmodule(@__MODULE__)
     function lj_forces(R::AbstractMatrix, box, nl::__NLCellsInternal__.HalfNeighborList;
                        ϵ::Real=1.0, σ::Real=1.0, rcut::Real=2.5,
                        shift::Bool=true, return_potential::Bool=false)
+    # Half-list aware kernel: each pair is visited once (j>i guaranteed).
+    # This removes a branch and halves memory traffic relative to a full list.
+    # Potential can be shifted so that U(rcut)=0 (no force smoothing).
         N = size(R,1)
         L = float(__NLCellsInternal__._box_length(box))
         rcut2 = float(rcut)^2

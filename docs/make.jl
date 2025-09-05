@@ -7,6 +7,7 @@ makedocs(
     sitename = "Verlet.jl",
     modules = [Verlet],
     format = Documenter.HTML(prettyurls = get(ENV, "CI", "false") == "true"),
+    checkdocs = :exports,
     pages = [
         "Home" => "index.md",
         "Guide" => Any[

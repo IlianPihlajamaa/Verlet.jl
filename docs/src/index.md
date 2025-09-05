@@ -101,12 +101,61 @@ F, U = lj_forces(R, box, nlist; rcut=2.5, return_potential=true)
 
 ### API
 
-```@docs
-NeighborList
-build_neighborlist
-maybe_rebuild!
-max_displacement_since_build
-wrap_positions!
+See the full API reference in `api.md`.
+
+## NEW: O(N) Build with Cell-Linked Lists + Half Neighbor Lists
+
+The classic `build_neighborlist` uses an **O(N²)** construction. For larger systems
+you can switch to a **cell-linked grid** builder that is **O(N)** at fixed density
+and emits a **half list** (each pair stored once with `j > i`):
+
+```@example
+using Verlet
+box = CubicBox(20.0)
+R = (rand(2_000,3) .- 0.5) .* box.L  # random positions in (-L/2, L/2]
+wrap_positions!(R, box)
+cutoff, skin = 2.5, 0.4
+grid = build_cellgrid(R, box; cell_size=cutoff+skin)
+nl = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
+# Force evaluation with half list (branch-free inner loop)
+F = lj_forces(R, box, nl; rcut=cutoff)  # or (F,U) with return_potential=true
+size(F)
+```
+
+### Why half lists?
+
+\* **Less memory**: store each pair once (≈½ the entries of a symmetric list).
+\* **Fewer branches**: kernel no longer checks `j > i` at runtime.
+\* **Same physics**: forces are accumulated for both `i` and `j` when a pair is visited.
+
+### Rebuild policy
+
+Use the same **half-skin rule** via `maybe_rebuild!`. With O(N) builds you
+can afford a **smaller skin** (e.g., 0.2–0.3) to reduce neighbor count and tighten
+force errors:
+
+```@example
+using Verlet
+box = CubicBox(15.0)
+R = randn(500,3); wrap_positions!(R, box)
+cutoff, skin = 2.5, 0.3
+grid = build_cellgrid(R, box; cell_size=cutoff+skin)
+nl = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
+
+# ... advance dynamics updating R ...
+
+if maybe_rebuild!(nl, R, box)
+    rebin!(grid, R, box) # O(N)
+    nl = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
+end
+```
+
+### Pitfalls
+
+\* **Box too small**: ensure `L > 2*(cutoff + skin)` so minimum-image distances are unambiguous.
+\* **Cell size semantics**: the grid uses an **effective** width `L/nx ≥ cutoff+skin`.
+\* **Units**: `R`/`L` must share the same units; `cutoff`/`skin` are in those units.
+\* **Precision**: distance math uses `Float64`. Mixed-precision inputs are converted.
 ```
 
 ### Performance Tips
@@ -120,7 +169,7 @@ wrap_positions!
 ### Common Pitfalls
 
 - Using a **too small skin** can cause missed interactions if particles move across the buffer before a rebuild.
-- Forgetting to call [`wrap_positions!`](@ref) regularly may lead to large apparent displacements across periodic boundaries.
+- Forgetting to call `wrap_positions!` regularly may lead to large apparent displacements across periodic boundaries.
 - The neighbor list includes symmetric neighbors. Forces should only be applied once per pair (the built-in `lj_forces` handles this).
 
 ### See Also
