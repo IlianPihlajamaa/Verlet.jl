@@ -33,8 +33,11 @@ module Verlet
 using LinearAlgebra
 
 export ParticleSystem, velocity_verlet!, kinetic_energy, potential_energy
-# New exports for periodic box & Lennard–Jones forces
-export CubicBox, minimum_image!, lj_forces
+    # New exports for periodic box & Lennard–Jones forces
+    export CubicBox, minimum_image!, lj_forces
+    # Neighbor list + utilities
+    export NeighborList, build_neighborlist, maybe_rebuild!, max_displacement_since_build,
+                 wrap_positions!
 
 """
     ParticleSystem
@@ -199,6 +202,26 @@ function minimum_image!(Δ::AbstractVector, box::CubicBox)
 end
 
 """
+    wrap_positions!(R::AbstractMatrix, box::CubicBox) -> R
+
+Wrap every coordinate into the interval `(-L/2, L/2]` in-place and return `R`.
+"""
+function wrap_positions!(R::AbstractMatrix, box::CubicBox)
+    half = box.L / 2
+    L = box.L
+    @inbounds for i in axes(R,1), k in axes(R,2)
+        # map to (-L/2, L/2]
+        while R[i,k] >  half
+            R[i,k] -= L
+        end
+        while R[i,k] <= -half
+            R[i,k] += L
+        end
+    end
+    return R
+end
+
+"""
     lj_forces(positions::AbstractMatrix, box::CubicBox;
               ϵ::Real=1.0, σ::Real=1.0, rcut::Real=Inf,
               shift::Bool=false, return_potential::Bool=false)
@@ -260,6 +283,7 @@ function lj_forces(positions::AbstractMatrix, box::CubicBox;
     return return_potential ? (F, U) : F
 end
 
+include("neighborlist.jl")
 
 
 end # module Verlet

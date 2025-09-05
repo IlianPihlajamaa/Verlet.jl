@@ -71,10 +71,11 @@ end
     box = CubicBox(100.0) # effectively no wrapping
     F, U = lj_forces(R, box; ϵ=ϵ, σ=σ, rcut=Inf, return_potential=true)
 
-    # Analytic force magnitude
+    # The component on particle 1 (at x=0) should be **positive** for r > r_min (attraction).
+    # Negate the coefficient so `fmag` is the expected +x component on particle 1.
     s    = σ/r
     s6   = s^6
-    fmag = 24*ϵ*(2*s6^2 - s6)/r  # along +x on particle 1
+    fmag = -24*ϵ*(2*s6^2 - s6)/r
     @test isapprox(F[1,1],  fmag; atol=1e-10)
     @test isapprox(F[2,1], -fmag; atol=1e-10)
     @test isapprox(F[1,2], 0.0; atol=1e-12)
@@ -127,3 +128,6 @@ end
     E1 = kinetic_energy(ps) + potential_energy(ps, forces)
     @test isfinite(E0) && isfinite(E1)
 end
+
+    # --- Neighbor list tests ---
+    include("test_neighborlist.jl")

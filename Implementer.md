@@ -9,6 +9,7 @@ Your job:
 * Add or update tests in `test/runtests.jl`.
 * Ensure the code type-checks and runs under Julia.
 * Return a unified diff patch (with \`\`\`diff fencing) showing exactly what changes to apply. 
+* Check that all acceptance tests in the DESIGN are covered,ensure the tests run.
 
 Rules:
 
@@ -30,255 +31,264 @@ julia -e 'import Pkg; Pkg.test()'
 to see if the tests run. You can also inspect the current state of the code by visiting https://github.com/IlianPihlajamaa/Verlet.jl
 
 # Current DESIGN.md
+Here’s a **drop-in replacement** for your `Design.md` with the requested edits folded in (half-list emphasis + benchmark guidance + rebuild/skin notes). You can paste this over the current file.
 
-# DESIGN.md — Next Feature Plan
+---
 
-## Overview — Add Periodic Box + Lennard–Jones Forces (O(N²))
+# DESIGN.md — Next Feature Plan (revised)
 
-To run physically meaningful MD, we need **inter-particle forces** and **boundary conditions**.
-Next step: implement a **cubic periodic box** with **minimum-image** convention and a standard **Lennard–Jones (LJ) pair potential** with optional cutoff. This unlocks simple fluids, sanity checks for energy conservation, and a base for future optimizations (neighbor lists, cell lists, PME, etc.).
+## Overview — **Cell-Linked Lists (Bins) for O(N) Neighbor Build** + **Half Neighbor Lists**
 
-Scope is intentionally minimal and self-contained:
+We have a working Verlet neighbor list and LJ+PBC kernels. Benchmarks show NL force evaluation overtakes brute force around **N ≈ 256** and scales to **\~46×** at **N = 8192** (ρ=1, rcut=2.5, skin=0.4). However, the **current O(N²) neighbor build** dominates runtime as N grows.
+Next, we add a **cell-linked grid** to make neighbor-list construction **O(N)** and switch the production path to a **half list** (store each pair once), halving memory and removing a branch in the kernel.
 
-* **Data type** for cubic box.
-* **Utility** to apply minimum-image displacement.
-* **Force provider** `lj_forces` compatible with the existing `forces(r; return_potential=true)` convention used by `potential_energy`.
+Scope is tight and non-breaking:
 
-No neighbor list yet (keep it small and clear).
+* Add `CellGrid` for cubic periodic boxes.
+* Provide `build_cellgrid`, `rebin!`, and `build_neighborlist_cells` (O(N) builder).
+* Emit **half neighbor lists** (pair stored once with `j>i`).
+* Keep existing APIs; the cell-based builder is an alternative to the current O(N²) builder.
 
 ---
 
 ## Public API
 
-### New types
+```julia
+struct CellGrid{IT<:Integer, T<:Real}
+    L::T                # box length (CubicBox-compatible)
+    cell_size::T        # typically rlist = cutoff + skin
+    dims::NTuple{3,IT}  # (nx, ny, nz)
+    heads::Vector{IT}   # length = nx*ny*nz; head of linked list per cell (0 = empty)
+    next::Vector{IT}    # length = N; next particle index in cell list (0 = end)
+end
 
-* `struct CubicBox{T<:Real}`
+build_cellgrid(R::AbstractMatrix, box::CubicBox; cell_size::Real) -> CellGrid
+rebin!(grid::CellGrid, R::AbstractMatrix, box::CubicBox) -> CellGrid
 
-  * `L::T` — box length (same in all dimensions).
+build_neighborlist_cells(R::AbstractMatrix, box::CubicBox;
+                         cutoff::Real, skin::Real=0.3,
+                         grid::Union{Nothing,CellGrid}=nothing) -> NeighborList
+# Emits a **half list**: each pair appears once with j>i.
+```
 
-### New functions
-
-* `minimum_image!(Δ::AbstractVector, box::CubicBox)`
-
-  * In-place minimum-image wrap of a displacement vector `Δ` so each component lies in `(-L/2, L/2]`.
-
-* `lj_forces(positions::AbstractMatrix, box::CubicBox;
-             ϵ::Real=1.0, σ::Real=1.0, rcut::Real=Inf,
-             shift::Bool=false, return_potential::Bool=false)`
-
-  * Returns an `(N×D)` force matrix; if `return_potential=true`, returns `(F, U::Float64)`.
-  * **Pair potential:**
-    $U(r) = 4\varepsilon \left[(\sigma/r)^{12} - (\sigma/r)^6\right]$
-  * **Pair force magnitude along $\hat r$:**
-    $f(r) = 24\varepsilon \left[2(\sigma/r)^{12} - (\sigma/r)^6\right]/r$
-  * **Cutoff:** include pairs with `r ≤ rcut`.
-    If `shift=true`, add a constant so that $U(rcut)=0$ (energy continuity); **no force smoothing** (derivative discontinuity remains).
-
-These are **not exported** unless you prefer; suggested exports:
+**Exports (add):**
 
 ```julia
-export CubicBox, minimum_image!, lj_forces
+export CellGrid, build_cellgrid, rebin!, build_neighborlist_cells
 ```
+
+Existing exports for `NeighborList`, `build_neighborlist`, `maybe_rebuild!`, `max_displacement_since_build`, `wrap_positions!` remain unchanged.
 
 ---
 
 ## Data Structures
 
 ```julia
-struct CubicBox{T<:Real}
-    L::T  # box length
+struct CellGrid{IT<:Integer, T<:Real}
+    L::T
+    cell_size::T                     # enforce cell_size ≤ rlist internally
+    dims::NTuple{3,IT}               # ≥ (1,1,1)
+    heads::Vector{IT}                # 1-based indices; 0 sentinel
+    next::Vector{IT}
 end
 ```
 
-* Immutable, trivially small.
-* Assumes simulation dimensionality `D` equals `size(positions, 2)`; we do not store `D` in the box.
-
-**Displacement scratch:**
-
-* Internally, `lj_forces` uses a small `Vector{Float64}` (length `D`) as a reusable scratch for `Δ`.
+* Linked list per cell avoids allocations during binning.
+* `dims = max(1, floor(Int, L/cell_size))` per axis; clamp so `cell_size ≤ rlist`.
+* Neighbor search visits the **27 neighboring cells** with periodic wrap.
 
 ---
 
 ## Algorithms
 
-### Minimum-image displacement
+### A) Build / Rebin Grid — O(N)
 
-For each component $\Delta_k$ of displacement vector `Δ`:
+1. Compute `(nx,ny,nz)` from `L` and `cell_size`.
+2. Zero `heads` (length `nx*ny*nz`) and `next` (length `N`).
+3. For each particle `i`, map position to **\[0,L)** then to `(cx,cy,cz)`, linearize to cell id `c`, and push-front: `next[i]=heads[c]; heads[c]=i`.
+
+### B) Build Half Neighbor List from Cells — O(N) at fixed density
+
+* `rlist = cutoff + skin`, precompute `rlist²`.
+* For each cell and particle `i` in it:
+
+  * For each of the 27 neighbor cells:
+
+    * For each particle `j` in that cell: **skip if `j ≤ i`** (enforce half list).
+    * Compute minimum-image `Δ`; if `‖Δ‖² ≤ rlist²`, record `(i,j)`.
+* Assemble CSR: first pass counts → `offsets` (N+1), second pass fills `pairs`.
+* Store `ref_positions = copy(R)`.
+
+### C) List-aware LJ Kernel (half list)
+
+Update the NL LJ kernel to **assume each pair appears once (half list)**. Remove runtime `j>i` checks and accumulate both particles’ forces in a single visit:
 
 ```
-half = box.L / 2
-if Δ[k] >  half: Δ[k] -= box.L
-if Δ[k] ≤ -half: Δ[k] += box.L
-```
-
-This maps to `(-L/2, L/2]`. Use `while` only if you ever expect |Δ|>L (shouldn’t occur for pairwise displacements formed via ri - rj).
-
-### Lennard–Jones forces (naive O(N²))
-
-Inputs: positions `R::(N×D)`, `box::CubicBox`, parameters `(ϵ, σ, rcut, shift)`.
-
-Pseudocode:
-
-```
-function lj_forces(R, box; ϵ=1, σ=1, rcut=Inf, shift=false, return_potential=false)
-    N, D = size(R)
-    F = zeros(N, D)
-    U = 0.0
-
-    σ2 = σ^2
-    rcut2 = rcut^2
-
-    # Optional energy shift
-    Uc = 0.0
-    if shift && isfinite(rcut)
-        s2c = σ2 / rcut2
-        s6c = s2c^3
-        Uc  = 4*ϵ*(s6c^2 - s6c)  # U(rcut)
+for i in 1:N
+  for idx in offsets[i]:(offsets[i+1]-1)
+    j = pairs[idx]  # j > i guaranteed by builder
+    Δ = R[i,:] - R[j,:]; minimum_image!(Δ, box)
+    r2 = dot(Δ,Δ)
+    if r2 ≤ cutoff^2
+        invr2 = 1/r2
+        s2 = (σ^2)*invr2
+        s6 = s2^3
+        fr_over_r = 24*ϵ*(2*s6^2 - s6)*invr2
+        Fi += fr_over_r * Δ
+        Fj -= fr_over_r * Δ
+        U  += 4*ϵ*(s6^2 - s6) - (shift ? Uc : 0)
     end
-
-    Δ = zeros(D)  # scratch
-
-    for i in 1:N-1
-        ri = @view R[i, :]
-        for j in i+1:N
-            rj = @view R[j, :]
-            Δ .= ri .- rj
-            minimum_image!(Δ, box)
-            r2 = dot(Δ, Δ)
-            if r2 <= rcut2
-                invr2 = 1 / r2
-                s2 = σ2 * invr2
-                s6 = s2^3
-                # Force magnitude over r: fr_over_r = 24ϵ*(2*s6^2 - s6) * invr2
-                fr_over_r = 24*ϵ*(2*s6^2 - s6) * invr2
-                # Vector force on i: Fi += fr_over_r * Δ
-                for k in 1:D
-                    f = fr_over_r * Δ[k]
-                    F[i,k] += f
-                    F[j,k] -= f
-                end
-                if return_potential
-                    U += 4*ϵ*(s6^2 - s6) - Uc
-                end
-            end
-        end
-    end
-    return return_potential ? (F, U) : F
+  end
 end
 ```
 
-Notes:
+### D) Rebuild Policy
 
-* All math avoids `sqrt` by working with `r²`; only the **unit direction** enters through multiplication by `Δ` (equivalent to dividing by `r`).
-* Newton’s third law is enforced by symmetric accumulation (`+` for `i`, `-` for `j`).
+Keep `maybe_rebuild!` (half-skin rule) unchanged. With O(N) builds, users can safely reduce `skin` to improve fidelity without large rebuild penalties.
 
 ---
 
 ## Numerical Pitfalls
 
-* **Singularity at r→0**: huge forces; users must avoid overlapping particles or add softening. We guard only via finite arithmetic.
-* **Cutoff discontinuity**: With `shift=false`, potential and force both jump at `rcut`. With `shift=true`, potential is continuous but **force remains discontinuous**. This can introduce small energy drift—acceptable for this minimal feature.
-* **Finite precision**: Use `Float64` for positions/velocities to reduce drift; consistent with current package.
-* **Box length vs positions**: Users must keep positions wrapped or large drifts can produce |Δ|>L/2 that violate minimum-image assumptions for direct `ri - rj`. Here we explicitly minimum-image the displacement, so positions themselves need not be wrapped each step, but keeping them within box helps debug output.
-* **Performance**: O(N²) scales poorly; neighbor lists and cell lists are the natural next step.
+* **Cell size**: enforce `cell_size ≤ rlist` or you risk missing pairs across cells.
+* **Tiny boxes / low dims**: `dims` can be `(1,1,1)` → degenerates to O(N²) inside one cell (correct but slower).
+* **Precision**: use `Float64` for distance math and accumulators.
+* **Geometry guard**: recommend `L > 2*(cutoff+skin)` to avoid ambiguous minimum-image shells.
+* **Half-list invariants**: kernel must not double-count; builder guarantees `j>i`.
 
 ---
 
 ## Acceptance Tests
 
-Add to `test/runtests.jl` (or a new `test/test_lj.jl` included by `runtests.jl`). Use `atol=1e-10` where needed.
+Add `test/test_cellgrid.jl` and include it from `test/runtests.jl`.
 
 ```julia
-using Test
-using Verlet
-
-@testset "CubicBox + minimum_image!" begin
-    box = CubicBox(10.0)
-    Δ = [ 6.0, -6.0,  0.1]  # in 3D
-    minimum_image!(Δ, box)
-    @test Δ[1] ==  6.0 - 10.0    # -> -4.0
-    @test Δ[2] == -6.0 + 10.0    # ->  4.0
-    @test isapprox(Δ[3], 0.1; atol=1e-12)
-end
-
-@testset "LJ two-particle (no PBC, analytic check)" begin
-    # Place two particles distance r along x
-    r  = 1.5
-    σ  = 1.0
-    ϵ  = 2.0
-    R  = [0.0 0.0 0.0;
-          r   0.0 0.0]
-    box = CubicBox(100.0) # effectively no wrapping
-    F, U = lj_forces(R, box; ϵ=ϵ, σ=σ, rcut=Inf, return_potential=true)
-
-    # Analytic force magnitude
-    s    = σ/r
-    s6   = s^6
-    fmag = 24*ϵ*(2*s6^2 - s6)/r  # along +x on particle 1
-    @test isapprox(F[1,1],  fmag; atol=1e-10)
-    @test isapprox(F[2,1], -fmag; atol=1e-10)
-    @test isapprox(F[1,2], 0.0; atol=1e-12)
-    @test isapprox(F[2,3], 0.0; atol=1e-12)
-
-    # Analytic potential
-    Uref = 4*ϵ*(s6^2 - s6)
-    @test isapprox(U, Uref; atol=1e-10)
-end
-
-@testset "LJ minimum-image under PBC" begin
-    # Put particles near opposite faces of a small box; distance should wrap
-    L = 5.0
+@testset "CellGrid build and rebin invariants" begin
+    N, D = 100, 3
+    L = 12.0
     box = CubicBox(L)
-    R = [ -2.4   0.0  0.0;   # ~ -L/2 + 0.1
-           2.4   0.0  0.0]   # ~  L/2 - 0.1
-    F = lj_forces(R, box; ϵ=1.0, σ=1.0, rcut=Inf, return_potential=false)
-    # Displacement should be 0.2 along x after wrapping; force pushes apart
-    @test F[1,1] > 0.0
-    @test F[2,1] < 0.0
-    @test isapprox(F[1,1], -F[2,1]; atol=1e-12)
+    R = rand(N, D) .* L .- (L/2)
+    wrap_positions!(R, box)
+
+    rcut, skin = 2.5, 0.4
+    rlist = rcut + skin
+
+    grid = build_cellgrid(R, box; cell_size=rlist)
+    @test grid.L == L
+    @test all(x -> x ≥ 1, grid.dims)
+    @test length(grid.next) == N
+    @test length(grid.heads) == prod(grid.dims)
+
+    rebin!(grid, R, box)
+    @test length(grid.next) == N
 end
 
-@testset "LJ cutoff and energy shift" begin
-    box = CubicBox(50.0)
-    R   = [0.0 0.0; 1.2 0.0]  # 2D for variety
-    rcut = 1.25
-    # With shift
-    F1, U1 = lj_forces(R, box; rcut=rcut, shift=true, return_potential=true)
-    # Move just beyond cutoff: forces zero, potential ~0 with shift=true
-    R2  = [0.0 0.0; 1.26 0.0]
-    F2, U2 = lj_forces(R2, box; rcut=rcut, shift=true, return_potential=true)
-    @test isapprox(norm(F2), 0.0; atol=1e-12)
-    @test U2 ≈ 0.0 atol=1e-10
-    @test U1 < 0.0  # attractive well inside cutoff
+@testset "Cell-based neighbor list ≡ naive rlist filter (half list)" begin
+    N, D = 128, 3
+    L = 15.0
+    box = CubicBox(L)
+    R = rand(N, D) .* L .- (L/2)
+    wrap_positions!(R, box)
+
+    cutoff, skin = 2.2, 0.5
+    nlist = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin)
+
+    rlist2 = (cutoff + skin)^2
+    ref_pairs = Vector{Tuple{Int,Int}}()
+    for i in 1:N-1, j in i+1:N
+        Δ = @view R[i,:] .- R[j,:]
+        minimum_image!(Δ, box)
+        if dot(Δ,Δ) ≤ rlist2 + 1e-12
+            push!(ref_pairs, (i,j))
+        end
+    end
+    sort!(ref_pairs)
+
+    got = Vector{Tuple{Int,Int}}()
+    for i in 1:N
+        for idx in nlist.offsets[i]:(nlist.offsets[i+1]-1)
+            j = nlist.pairs[idx]
+            @test j > i
+            push!(got, (i,j))
+        end
+    end
+    sort!(got)
+    @test got == ref_pairs
 end
 
-@testset "Compatibility with velocity_verlet! API" begin
-    # Use lj_forces as the `forces` function with potential return
-    box = CubicBox(20.0)
-    forces(r; return_potential=false) = return_potential ?
-        lj_forces(r, box; return_potential=true) :
-        lj_forces(r, box; return_potential=false)
+@testset "LJ with half list from cells matches brute force" begin
+    N, D = 64, 3
+    L = 12.0
+    box = CubicBox(L)
+    R = rand(N, D) .* L .- (L/2)
+    wrap_positions!(R, box)
 
-    ps = ParticleSystem([0.9 0.0 0.0; 0.0 0.0 0.0],
-                        zeros(2,3),
-                        ones(2))
-    E0 = kinetic_energy(ps) + potential_energy(ps, forces)
-    velocity_verlet!(ps, forces, 1e-3)
-    E1 = kinetic_energy(ps) + potential_energy(ps, forces)
-    @test isfinite(E0) && isfinite(E1)
+    ϵ, σ, cutoff, skin = 1.0, 1.0, 2.5, 0.4
+    nlist = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin)
+
+    F_ref, U_ref = lj_forces(R, box; ϵ=ϵ, σ=σ, rcut=cutoff, return_potential=true)
+    F_nl,  U_nl  = lj_forces(R, box, nlist; ϵ=ϵ, σ=σ, shift=false, return_potential=true)
+
+    @test isapprox(F_nl, F_ref; atol=1e-10, rtol=1e-10)
+    @test isapprox(U_nl,  U_ref; atol=1e-10, rtol=1e-10)
+end
+
+@testset "Rebin + maybe_rebuild! integration" begin
+    N, D = 80, 3
+    L = 14.0
+    box = CubicBox(L)
+    R = rand(N, D) .* L .- (L/2)
+    wrap_positions!(R, box)
+
+    cutoff, skin = 2.5, 0.4
+    grid = build_cellgrid(R, box; cell_size=cutoff+skin)
+    nlist = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
+
+    R .+= 0.1 .* randn(N, D); wrap_positions!(R, box)
+    @test maybe_rebuild!(nlist, R, box) == false
+
+    R .+= 0.35 .* randn(N, D); wrap_positions!(R, box)
+    if maybe_rebuild!(nlist, R, box)
+        rebin!(grid, R, box)
+        nlist2 = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
+        @test length(nlist2.pairs) > 0
+    end
 end
 ```
 
 ---
 
+## Benchmark Guidance (documentation, not a test)
+
+* At **ρ≈1, D=3, rcut=2.5, skin=0.4**:
+
+  * NL force evaluation overtakes O(N²) at **N≈256**.
+  * Speedup grows with N: \~3× (512), \~6× (1024), \~23× (4096), \~46× (8192).
+* With **O(N) builds**, you may reduce **skin** (e.g., 0.2–0.3) to improve force accuracy without paying a quadratic rebuild cost.
+
+---
+
+## Implementation Notes
+
+* Files:
+
+  * `src/cellgrid.jl`: `CellGrid`, `build_cellgrid`, `rebin!`, helpers (`cell_index`, periodic wrap).
+  * `src/neighborlist_cells.jl`: `build_neighborlist_cells` (emits **half list**).
+  * `include` both from `src/Verlet.jl`; add exports listed above.
+* Ensure **half list** throughout: the cell builder guarantees `j>i`; update the NL LJ kernel to **not** branch on `j>i`.
+* Keep distance math and accumulators in `Float64`.
+* Enforce `cell_size ≤ rlist` inside `build_cellgrid` to preserve correctness.
+
+---
+
 ## Task for Implementer (small & focused)
 
-1. **Add types & functions** to `src/Verlet.jl` (or split into `src/forces.jl` and `include` it from `Verlet.jl`):
+1. Implement `CellGrid`, `build_cellgrid`, and `rebin!` (O(N) binning) in `src/cellgrid.jl`.
+2. Implement `build_neighborlist_cells` that:
 
-   * `CubicBox{T}`, `minimum_image!`, `lj_forces` exactly per API above.
-   * Keep `lj_forces` free-function (not tied to `ParticleSystem`) so it composes with current `potential_energy` convention.
-2. **Export** `CubicBox, minimum_image!, lj_forces` (optional but recommended).
-3. **Write tests** as specified (you can place them in `test/test_lj.jl` and include from `test/runtests.jl`).
-4. **Docs**: add a short usage snippet to `docs/src/guide/forces.md` demonstrating `forces(r) = lj_forces(r, CubicBox(…))`.
-
-That’s it. Once this lands, we can profile and then design a **Verlet neighbor list** with rebuild heuristics and vectorized kernels as the next incremental feature.
+   * Uses 27-cell sweep with periodic wrap,
+   * Emits a **half list** with `j>i`,
+   * Returns a valid CSR `NeighborList` with `ref_positions = copy(R)`.
+3. Update `src/Verlet.jl` to include new files and exports.
+4. Add `test/test_cellgrid.jl` with the Acceptance Tests and include from `test/runtests.jl`.
+5. (Optional) Add `bench/bench_cellgrid_build.jl` to compare O(N²) vs O(N) builds at N∈{256,512,1024,2048}.
