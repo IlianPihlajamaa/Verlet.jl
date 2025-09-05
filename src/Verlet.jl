@@ -289,5 +289,22 @@ include("cellgrid.jl")
 include("neighborlist_cells.jl")
 include("neighborlist.jl")
 
+# ------------------------------------------------------------------
+# Existing includes/exports for the package live above this block.
+# ------------------------------------------------------------------
+
+# === Thermostats & Temperature Utilities ==========================
+# Add BAOAB Langevin thermostat and temperature helpers
+include("thermostats.jl")
+
+export langevin_baoab!, instantaneous_temperature, degrees_of_freedom, velocity_rescale!
+
+# Constraints module
+include("constraints.jl")
+export DistanceConstraints,
+       velocity_verlet_shake_rattle!,
+       apply_shake!, apply_rattle!,
+       remove_com_motion!
 
 end # module Verlet
+

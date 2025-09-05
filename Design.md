@@ -1,261 +1,338 @@
-Here’s a **drop-in replacement** for your `Design.md` with the requested edits folded in (half-list emphasis + benchmark guidance + rebuild/skin notes). You can paste this over the current file.
+# DESIGN.md — Next Feature Plan
 
----
+## Overview — **Holonomic Distance Constraints (SHAKE/RATTLE) + COM Drift Removal**
 
-# DESIGN.md — Next Feature Plan (revised)
+With neighbor lists, LJ + PBC, and an NVT (BAOAB) thermostat on deck, the next capability that unlocks **larger stable timesteps** and **molecular realism** is support for **holonomic distance constraints** (e.g., rigid bonds to H). We’ll implement classical **SHAKE** (position projection) and **RATTLE** (velocity projection) for **pairwise distance constraints**, plus a light utility to **remove center-of-mass (COM) drift**.
 
-## Overview — **Cell-Linked Lists (Bins) for O(N) Neighbor Build** + **Half Neighbor Lists**
+Benefits:
 
-We have a working Verlet neighbor list and LJ+PBC kernels. Benchmarks show NL force evaluation overtakes brute force around **N ≈ 256** and scales to **\~46×** at **N = 8192** (ρ=1, rcut=2.5, skin=0.4). However, the **current O(N²) neighbor build** dominates runtime as N grows.
-Next, we add a **cell-linked grid** to make neighbor-list construction **O(N)** and switch the production path to a **half list** (store each pair once), halving memory and removing a branch in the kernel.
+* Enable typical “rigid bonds to H” workflows and **increase `dt`** (e.g., from 1 fs → 2 fs equivalents in reduced units).
+* Provide a clean path to rigid molecules (e.g., TIP3P water via distance-only constraints first; angle/SETTLE can come later).
+* Integrate with existing integrators; provide a **constrained VV** driver and a **constraint-aware DoF** for temperature tools.
 
-Scope is tight and non-breaking:
+Scope (tight, non-breaking):
 
-* Add `CellGrid` for cubic periodic boxes.
-* Provide `build_cellgrid`, `rebin!`, and `build_neighborlist_cells` (O(N) builder).
-* Emit **half neighbor lists** (pair stored once with `j>i`).
-* Keep existing APIs; the cell-based builder is an alternative to the current O(N²) builder.
+* New `constraints.jl` module with a minimal `DistanceConstraints` struct.
+* `velocity_verlet_shake_rattle!` integrator (wrapper over current VV) that applies SHAKE/RATTLE.
+* Update `degrees_of_freedom` to account for constraints (optionally COM removal).
+* Utility: `remove_com_motion!` (mass-weighted).
 
 ---
 
 ## Public API
 
 ```julia
-struct CellGrid{IT<:Integer, T<:Real}
-    L::T                # box length (CubicBox-compatible)
-    cell_size::T        # typically rlist = cutoff + skin
-    dims::NTuple{3,IT}  # (nx, ny, nz)
-    heads::Vector{IT}   # length = nx*ny*nz; head of linked list per cell (0 = empty)
-    next::Vector{IT}    # length = N; next particle index in cell list (0 = end)
-end
+"""
+    DistanceConstraints(pairs, lengths; tol=1e-8, maxiter=50, use_minimum_image=true)
 
-build_cellgrid(R::AbstractMatrix, box::CubicBox; cell_size::Real) -> CellGrid
-rebin!(grid::CellGrid, R::AbstractMatrix, box::CubicBox) -> CellGrid
+Create a distance-constraint set:
+- pairs::Vector{Tuple{Int,Int}}: constrained atom index pairs (1-based)
+- lengths::Vector{Float64}: target distances (same units as positions)
+- tol: max |constraint violation| tolerated for convergence (in length^2)
+- maxiter: maximum SHAKE and RATTLE iterations per step
+- use_minimum_image: if true, constraints use minimum-image displacement under PBC
+"""
+struct DistanceConstraints end  # concrete fields described below
+DistanceConstraints(pairs, lengths; tol=1e-8, maxiter=50, use_minimum_image=true)
 
-build_neighborlist_cells(R::AbstractMatrix, box::CubicBox;
-                         cutoff::Real, skin::Real=0.3,
-                         grid::Union{Nothing,CellGrid}=nothing) -> NeighborList
-# Emits a **half list**: each pair appears once with j>i.
+"""
+    velocity_verlet_shake_rattle!(ps::ParticleSystem, forces, dt, cons::DistanceConstraints)
+
+Advance one constrained step:
+1) VV half-kick, drift
+2) SHAKE position projection
+3) Recompute forces
+4) VV half-kick
+5) RATTLE velocity projection
+"""
+velocity_verlet_shake_rattle!(ps, forces, dt, cons)
+
+"""
+    apply_shake!(ps::ParticleSystem, cons::DistanceConstraints, dt)
+
+Project positions to satisfy all constraints (used inside integrators).
+"""
+apply_shake!(ps, cons, dt)
+
+"""
+    apply_rattle!(ps::ParticleSystem, cons::DistanceConstraints)
+
+Project velocities to satisfy the differential constraints d/dt C_l = 0.
+"""
+apply_rattle!(ps, cons)
+
+"""
+    degrees_of_freedom(ps; constraints=nothing, remove_com=false) -> Int
+
+Return the effective translational DoF given optional constraints and COM removal.
+"""
+degrees_of_freedom(ps; constraints=nothing, remove_com=false) -> Int
+
+"""
+    remove_com_motion!(ps; which=:velocity)
+
+Remove center-of-mass motion:
+- which = :velocity | :position | :both
+"""
+remove_com_motion!(ps; which=:velocity)
 ```
 
 **Exports (add):**
 
 ```julia
-export CellGrid, build_cellgrid, rebin!, build_neighborlist_cells
+export DistanceConstraints,
+       velocity_verlet_shake_rattle!,
+       apply_shake!, apply_rattle!,
+       remove_com_motion!
+# `degrees_of_freedom` is already exported; extend its method with kwargs.
 ```
 
-Existing exports for `NeighborList`, `build_neighborlist`, `maybe_rebuild!`, `max_displacement_since_build`, `wrap_positions!` remain unchanged.
+**Files (new/updated):**
+
+* `src/constraints.jl` — all constraint types & algorithms.
+* `src/Verlet.jl` — `include("constraints.jl")`, export new symbols, extend `degrees_of_freedom`.
 
 ---
 
 ## Data Structures
 
 ```julia
-struct CellGrid{IT<:Integer, T<:Real}
-    L::T
-    cell_size::T                     # enforce cell_size ≤ rlist internally
-    dims::NTuple{3,IT}               # ≥ (1,1,1)
-    heads::Vector{IT}                # 1-based indices; 0 sentinel
-    next::Vector{IT}
+struct DistanceConstraints
+    i::Vector{Int}          # first atom index per constraint
+    j::Vector{Int}          # second atom index per constraint
+    r0::Vector{Float64}     # target distances per constraint
+    tol::Float64            # convergence tolerance on |C_l|
+    maxiter::Int            # maximum iterations
+    use_minimum_image::Bool # apply minimum-image to displacement vectors
 end
 ```
 
-* Linked list per cell avoids allocations during binning.
-* `dims = max(1, floor(Int, L/cell_size))` per axis; clamp so `cell_size ≤ rlist`.
-* Neighbor search visits the **27 neighboring cells** with periodic wrap.
+* **Mutability:** keep `DistanceConstraints` **immutable** (parameters). All corrections are applied to `ParticleSystem` in place.
+* **Masses:** read from `ps.masses`.
+* **Box / PBC:** assume an orthorhombic box already exists in the codebase; if not, use raw positions and set `use_minimum_image=false` (documented).
 
 ---
 
 ## Algorithms
 
-### A) Build / Rebin Grid — O(N)
+### Constraints
 
-1. Compute `(nx,ny,nz)` from `L` and `cell_size`.
-2. Zero `heads` (length `nx*ny*nz`) and `next` (length `N`).
-3. For each particle `i`, map position to **\[0,L)** then to `(cx,cy,cz)`, linearize to cell id `c`, and push-front: `next[i]=heads[c]; heads[c]=i`.
-
-### B) Build Half Neighbor List from Cells — O(N) at fixed density
-
-* `rlist = cutoff + skin`, precompute `rlist²`.
-* For each cell and particle `i` in it:
-
-  * For each of the 27 neighbor cells:
-
-    * For each particle `j` in that cell: **skip if `j ≤ i`** (enforce half list).
-    * Compute minimum-image `Δ`; if `‖Δ‖² ≤ rlist²`, record `(i,j)`.
-* Assemble CSR: first pass counts → `offsets` (N+1), second pass fills `pairs`.
-* Store `ref_positions = copy(R)`.
-
-### C) List-aware LJ Kernel (half list)
-
-Update the NL LJ kernel to **assume each pair appears once (half list)**. Remove runtime `j>i` checks and accumulate both particles’ forces in a single visit:
+Each distance constraint `l` ties atoms `i,j` with
 
 ```
-for i in 1:N
-  for idx in offsets[i]:(offsets[i+1]-1)
-    j = pairs[idx]  # j > i guaranteed by builder
-    Δ = R[i,:] - R[j,:]; minimum_image!(Δ, box)
-    r2 = dot(Δ,Δ)
-    if r2 ≤ cutoff^2
-        invr2 = 1/r2
-        s2 = (σ^2)*invr2
-        s6 = s2^3
-        fr_over_r = 24*ϵ*(2*s6^2 - s6)*invr2
-        Fi += fr_over_r * Δ
-        Fj -= fr_over_r * Δ
-        U  += 4*ϵ*(s6^2 - s6) - (shift ? Uc : 0)
-    end
-  end
+C_l(r) = ||r_i - r_j||^2 - r0_l^2 = 0.
+```
+
+#### SHAKE (positions)
+
+After the unconstrained drift, we correct positions with Lagrange multipliers `{λ_l}`:
+
+For constraint `l` with `d_ij = r_i - r_j` (use minimum image if requested),
+
+```
+σ_l = (1/m_i + 1/m_j) * (d_ij ⋅ d_ij)
+Δλ_l = - C_l(r) / (2 * σ_l)
+Δr_i =  (Δλ_l / m_i) * d_ij
+Δr_j = -(Δλ_l / m_j) * d_ij
+```
+
+Apply Gauss–Seidel style updates **iteratively** over all constraints until:
+
+```
+max_l |C_l(r)| ≤ tol   or   iterations ≥ maxiter
+```
+
+**Notes:**
+
+* Use current `d_ij` each sub-iteration (Gauss–Seidel converges better than Jacobi).
+* If `σ_l` is extremely small (atoms nearly coincident), abort with a descriptive error.
+* With PBC, compute `d_ij` via minimum image, but apply corrections to wrapped positions directly (positions should remain inside the primary cell; the constraint is topologically within a molecule, so this is physically consistent).
+
+#### RATTLE (velocities)
+
+Enforce the velocity constraint
+
+```
+d/dt C_l = 2 d_ij ⋅ (v_i - v_j) = 0.
+```
+
+Solve for `μ_l` and correct velocities:
+
+```
+τ_l = (1/m_i + 1/m_j) * (d_ij ⋅ d_ij)
+μ_l = - (d_ij ⋅ (v_i - v_j)) / τ_l
+Δv_i =  (μ_l / m_i) * d_ij
+Δv_j = -(μ_l / m_j) * d_ij
+```
+
+Iterate over constraints until `max_l |d_ij ⋅ (v_i - v_j)| ≤ tol_v`, with `tol_v` tied to `tol` (e.g., `tol_v = tol^(1/2)`), or reuse `tol` for simplicity.
+
+#### Constrained VV driver
+
+```
+# B
+v  ← v + (dt/2) * a(r)
+# A
+r  ← r + dt * v
+# SHAKE
+apply_shake!(ps, cons, dt)
+# recompute forces at corrected r
+a  ← F(r) ./ m
+# B
+v  ← v + (dt/2) * a
+# RATTLE (velocities)
+apply_rattle!(ps, cons)
+```
+
+This driver preserves the geometric constraints to within tolerances and is compatible with the current force callback.
+
+> **Thermostat compatibility:** If combining with Langevin (BAOAB), the O-step (stochastic OU) should be followed by a **RATTLE projection** of velocities to keep constraints satisfied. For this first iteration, we ship the **constrained VV** path; extending BAOAB with RATTLE is a follow-up.
+
+### degrees\_of\_freedom with constraints
+
+Let `N`, `D`, and `C = length(cons.r0)`. Then
+
+```
+dof = N*D - C
+if remove_com
+   dof -= D
 end
+dof = max(dof, 0)
 ```
 
-### D) Rebuild Policy
+This integrates with `instantaneous_temperature(ps; kB)`.
 
-Keep `maybe_rebuild!` (half-skin rule) unchanged. With O(N) builds, users can safely reduce `skin` to improve fidelity without large rebuild penalties.
+### remove\_com\_motion!
+
+Mass-weighted COM velocity:
+
+```
+Vcom = (Σ m_i v_i) / (Σ m_i)
+v_i ← v_i - Vcom
+```
+
+Optionally also recenter positions similarly (for non-PBC use).
 
 ---
 
 ## Numerical Pitfalls
 
-* **Cell size**: enforce `cell_size ≤ rlist` or you risk missing pairs across cells.
-* **Tiny boxes / low dims**: `dims` can be `(1,1,1)` → degenerates to O(N²) inside one cell (correct but slower).
-* **Precision**: use `Float64` for distance math and accumulators.
-* **Geometry guard**: recommend `L > 2*(cutoff+skin)` to avoid ambiguous minimum-image shells.
-* **Half-list invariants**: kernel must not double-count; builder guarantees `j>i`.
+* **Convergence:** Tight `tol` with complex constraint networks (e.g., rings) can require many iterations. Expose `maxiter` and return a clear error if not converged.
+* **Ill-conditioning:** Very small `σ_l` (near-zero bond length or coincident atoms) leads to numerical blow-up; detect and abort early.
+* **PBC displacement:** Minimum-image must be used **consistently** for `d_ij`. If constraints span a molecule that crosses a boundary, ensure unwrapped molecular coordinates are conceptually consistent. For now we assume constraints occur within a molecule and the minimum-image choice is valid.
+* **Thermostats:** Any velocity randomization step must be followed by **RATTLE** to avoid drift off the constraint manifold.
+* **DoF accounting:** When constraints are active (and optionally COM removal), temperature estimators and barostats must use the **reduced DoF** to avoid biased thermodynamics.
+* **Large dt:** Constraints allow larger `dt` but do not make dynamics unconditionally stable; monitor energy and constraint residuals.
 
 ---
 
 ## Acceptance Tests
 
-Add `test/test_cellgrid.jl` and include it from `test/runtests.jl`.
+Add `test/test_constraints.jl` and include from `test/runtests.jl`.
 
 ```julia
-@testset "CellGrid build and rebin invariants" begin
-    N, D = 100, 3
-    L = 12.0
-    box = CubicBox(L)
-    R = rand(N, D) .* L .- (L/2)
-    wrap_positions!(R, box)
+@testset "DistanceConstraints basics" begin
+    # Diatomic, 3D, one constraint
+    N, D = 2, 3
+    r0 = 1.25
+    ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
+    ps.positions[1,1] = 0.0
+    ps.positions[2,1] = r0 + 0.1               # slight violation
+    cons = DistanceConstraints([(1,2)], [r0]; tol=1e-10, maxiter=100)
 
-    rcut, skin = 2.5, 0.4
-    rlist = rcut + skin
+    apply_shake!(ps, cons, 0.01)
+    d = ps.positions[1,:] .- ps.positions[2,:]
+    @test isapprox(norm(d), r0; rtol=0, atol=1e-8)
+end)
 
-    grid = build_cellgrid(R, box; cell_size=rlist)
-    @test grid.L == L
-    @test all(x -> x ≥ 1, grid.dims)
-    @test length(grid.next) == N
-    @test length(grid.heads) == prod(grid.dims)
+@testset "RATTLE projects velocities" begin
+    N, D = 2, 3
+    r0 = 1.0
+    ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
+    ps.positions[1,1] = 0.0
+    ps.positions[2,1] = r0
+    cons = DistanceConstraints([(1,2)], [r0])
 
-    rebin!(grid, R, box)
-    @test length(grid.next) == N
-end
+    # Give violating relative velocity along the bond
+    ps.velocities[1,1] =  +0.3
+    ps.velocities[2,1] =  -0.1
+    apply_rattle!(ps, cons)
+    d = ps.positions[1,:] .- ps.positions[2,:]
+    vrel = ps.velocities[1,:] .- ps.velocities[2,:]
+    @test isapprox(dot(d, vrel), 0.0; atol=1e-10)
+end)
 
-@testset "Cell-based neighbor list ≡ naive rlist filter (half list)" begin
-    N, D = 128, 3
-    L = 15.0
-    box = CubicBox(L)
-    R = rand(N, D) .* L .- (L/2)
-    wrap_positions!(R, box)
+@testset "Constrained VV holds bond length" begin
+    # Zero external forces: constraint should keep distance fixed over many steps
+    N, D = 2, 3
+    r0 = 0.75
+    ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
+    ps.positions[2,1] = r0
+    ps.velocities .= 0.01                         # small motion
+    cons = DistanceConstraints([(1,2)], [r0]; tol=1e-10, maxiter=100)
+    dt = 0.02
+    forces(R) = zero(R)                           # no forces
 
-    cutoff, skin = 2.2, 0.5
-    nlist = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin)
-
-    rlist2 = (cutoff + skin)^2
-    ref_pairs = Vector{Tuple{Int,Int}}()
-    for i in 1:N-1, j in i+1:N
-        Δ = @view R[i,:] .- R[j,:]
-        minimum_image!(Δ, box)
-        if dot(Δ,Δ) ≤ rlist2 + 1e-12
-            push!(ref_pairs, (i,j))
-        end
+    for _ in 1:500
+        velocity_verlet_shake_rattle!(ps, forces, dt, cons)
     end
-    sort!(ref_pairs)
+    d = ps.positions[1,:] .- ps.positions[2,:]
+    @test isapprox(norm(d), r0; atol=1e-7)
+end)
 
-    got = Vector{Tuple{Int,Int}}()
-    for i in 1:N
-        for idx in nlist.offsets[i]:(nlist.offsets[i+1]-1)
-            j = nlist.pairs[idx]
-            @test j > i
-            push!(got, (i,j))
-        end
-    end
-    sort!(got)
-    @test got == ref_pairs
-end
+@testset "degrees_of_freedom with constraints and COM" begin
+    N, D = 5, 3
+    pairs = [(1,2), (3,4)]
+    r0s = [1.0, 1.5]
+    cons = DistanceConstraints(pairs, r0s)
+    ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
+    @test degrees_of_freedom(ps; constraints=cons, remove_com=false) == N*D - length(pairs)
+    @test degrees_of_freedom(ps; constraints=cons, remove_com=true)  == N*D - length(pairs) - D
+end)
 
-@testset "LJ with half list from cells matches brute force" begin
-    N, D = 64, 3
-    L = 12.0
-    box = CubicBox(L)
-    R = rand(N, D) .* L .- (L/2)
-    wrap_positions!(R, box)
-
-    ϵ, σ, cutoff, skin = 1.0, 1.0, 2.5, 0.4
-    nlist = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin)
-
-    F_ref, U_ref = lj_forces(R, box; ϵ=ϵ, σ=σ, rcut=cutoff, return_potential=true)
-    F_nl,  U_nl  = lj_forces(R, box, nlist; ϵ=ϵ, σ=σ, shift=false, return_potential=true)
-
-    @test isapprox(F_nl, F_ref; atol=1e-10, rtol=1e-10)
-    @test isapprox(U_nl,  U_ref; atol=1e-10, rtol=1e-10)
-end
-
-@testset "Rebin + maybe_rebuild! integration" begin
-    N, D = 80, 3
-    L = 14.0
-    box = CubicBox(L)
-    R = rand(N, D) .* L .- (L/2)
-    wrap_positions!(R, box)
-
-    cutoff, skin = 2.5, 0.4
-    grid = build_cellgrid(R, box; cell_size=cutoff+skin)
-    nlist = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
-
-    R .+= 0.1 .* randn(N, D); wrap_positions!(R, box)
-    @test maybe_rebuild!(nlist, R, box) == false
-
-    R .+= 0.35 .* randn(N, D); wrap_positions!(R, box)
-    if maybe_rebuild!(nlist, R, box)
-        rebin!(grid, R, box)
-        nlist2 = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
-        @test length(nlist2.pairs) > 0
-    end
-end
+@testset "remove_com_motion! removes mass-weighted COM velocity" begin
+    N, D = 3, 3
+    ps = ParticleSystem(zeros(N,D), zeros(N,D), [1.0, 2.0, 3.0])
+    ps.velocities .= 1.0
+    remove_com_motion!(ps; which=:velocity)
+    Vcom = (sum(ps.masses .* ps.velocities[:,1])) / sum(ps.masses)
+    @test isapprox(Vcom, 0.0; atol=1e-14)
+end)
 ```
-
----
-
-## Benchmark Guidance (documentation, not a test)
-
-* At **ρ≈1, D=3, rcut=2.5, skin=0.4**:
-
-  * NL force evaluation overtakes O(N²) at **N≈256**.
-  * Speedup grows with N: \~3× (512), \~6× (1024), \~23× (4096), \~46× (8192).
-* With **O(N) builds**, you may reduce **skin** (e.g., 0.2–0.3) to improve force accuracy without paying a quadratic rebuild cost.
 
 ---
 
 ## Implementation Notes
 
-* Files:
-
-  * `src/cellgrid.jl`: `CellGrid`, `build_cellgrid`, `rebin!`, helpers (`cell_index`, periodic wrap).
-  * `src/neighborlist_cells.jl`: `build_neighborlist_cells` (emits **half list**).
-  * `include` both from `src/Verlet.jl`; add exports listed above.
-* Ensure **half list** throughout: the cell builder guarantees `j>i`; update the NL LJ kernel to **not** branch on `j>i`.
-* Keep distance math and accumulators in `Float64`.
-* Enforce `cell_size ≤ rlist` inside `build_cellgrid` to preserve correctness.
+* Use `@views` and in-place updates; avoid temporary allocations in inner loops.
+* Iterate constraints Gauss–Seidel style for better convergence; 2–5 sweeps usually suffice for simple molecules.
+* Factor out a helper that computes `d_ij` (with minimum image if `use_minimum_image=true`) to keep code DRY.
+* Keep `tol` on the squared constraint `|C_l|` (units length²). When checking `||r_i - r_j||`, convert appropriately.
+* Extend `degrees_of_freedom` method to accept `constraints` and `remove_com` kwargs; keep old method for backward compatibility.
 
 ---
 
 ## Task for Implementer (small & focused)
 
-1. Implement `CellGrid`, `build_cellgrid`, and `rebin!` (O(N) binning) in `src/cellgrid.jl`.
-2. Implement `build_neighborlist_cells` that:
+1. Create `src/constraints.jl` with:
 
-   * Uses 27-cell sweep with periodic wrap,
-   * Emits a **half list** with `j>i`,
-   * Returns a valid CSR `NeighborList` with `ref_positions = copy(R)`.
-3. Update `src/Verlet.jl` to include new files and exports.
-4. Add `test/test_cellgrid.jl` with the Acceptance Tests and include from `test/runtests.jl`.
-5. (Optional) Add `bench/bench_cellgrid_build.jl` to compare O(N²) vs O(N) builds at N∈{256,512,1024,2048}.
+   * `struct DistanceConstraints` (fields as above) + constructor.
+   * `apply_shake!`, `apply_rattle!` implementing the formulas and iterations described.
+   * `velocity_verlet_shake_rattle!` that wraps existing VV steps and calls SHAKE/RATTLE appropriately.
+   * `remove_com_motion!` (mass-weighted).
+2. Extend `degrees_of_freedom(ps; constraints=nothing, remove_com=false)` in `src/thermostats.jl` (or a shared util) to account for constraints/COM.
+3. `include("constraints.jl")` and export new symbols in `src/Verlet.jl`.
+4. Add `test/test_constraints.jl` with the Acceptance Tests above and include from `test/runtests.jl`.
+5. Ensure docstrings reference units and PBC options; add method signatures to the main README brief.
+
+---
+
+## To-Do’s for Documenter
+
+* **Guide → Constraints:** Short page “Constrained Dynamics (SHAKE/RATTLE)” with:
+
+  * When to use constraints; typical `dt` gains and caveats.
+  * Minimal example constructing `DistanceConstraints` for a small molecule and running `velocity_verlet_shake_rattle!`.
+  * Interplay with temperature: explain the **reduced DoF**.
+* **API Reference:** `DistanceConstraints`, `apply_shake!`, `apply_rattle!`, `velocity_verlet_shake_rattle!`, `remove_com_motion!`, updated `degrees_of_freedom`.
+* **Numerics Notes:** Tips on convergence (`tol`, `maxiter`), and PBC minimum image implications for intramolecular constraints.

@@ -23,6 +23,14 @@ velocity_verlet!(ps, forces, dt)
 ps.positions
 ```
 
+## Next Steps
+
+Check out the \[Guide → Constrained Dynamics](@ref constraints-guide) section to learn how to:
+
+- Set up bond constraints with [`DistanceConstraints`](@ref)
+- Run constrained dynamics with [`velocity_verlet_shake_rattle!`](@ref)
+
+
 ## Harmonic oscillator
 ```@example ho
 using Verlet
@@ -72,6 +80,9 @@ end
 * Avoid huge `dt`. Start small (e.g., `1e-3` in your time units) and increase cautiously.
 
 See also: \[Numerics & Pitfalls]\(@ref numerics).
+
+With constraints, you can simulate rigid bonds (e.g. water models) and safely
+increase timestep sizes while preserving stability.
 
 ## Speeding up LJ with a Neighbor List
 

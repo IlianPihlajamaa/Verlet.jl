@@ -11,6 +11,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "Guide" => Any[
+            "Constrained Dynamics" => "guide/constraints.md",
             "Forces & Potentials" => "guide/forces.md",
             "Numerics & Pitfalls" => "guide/numerics.md",
         ],

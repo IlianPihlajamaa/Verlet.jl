@@ -1,0 +1,145 @@
+# Constrained Dynamics (SHAKE/RATTLE)
+
+`@id constraints-guide
+`
+
+Molecular simulations often require certain bond lengths (e.g. X–H bonds in water) to remain fixed.
+This enables **larger stable timesteps** and enforces realistic rigid-body structures.
+
+Verlet.jl provides support for **holonomic distance constraints** using the
+classical **SHAKE** (positions) and **RATTLE** (velocities) algorithms.
+
+## Defining Constraints
+
+Use [`DistanceConstraints`](@ref) to define a set of pairwise distance constraints:
+
+```@example constraints
+using Verlet
+using LinearAlgebra
+
+# A diatomic molecule with target bond length 1.0
+pairs   = [(1,2)]
+lengths = [1.0]
+cons = DistanceConstraints(pairs, lengths; tol=1e-10, maxiter=100)
+```
+
+Arguments:
+
+- `pairs`: vector of `(i,j)` atom index pairs (1-based)
+- `lengths`: vector of target distances
+- `tol`: maximum squared violation tolerated (`|C_l|` units length²)
+- `maxiter`: maximum SHAKE/RATTLE iterations per step
+- `use_minimum_image`: apply minimum image convention under periodic boundaries
+
+!!! tip
+    For constraints across periodic boundaries, keep molecules whole and use
+    `use_minimum_image=true`.
+
+## Constrained Integrator
+
+The [`velocity_verlet_shake_rattle!`](@ref) driver advances the system with constraints enforced:
+
+```@example constraints
+N, D = 2, 3
+ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
+ps.positions[2,1] = 1.2   # initial bond slightly off
+
+forces(R) = zero(R)  # no external forces
+
+for step in 1:100
+    velocity_verlet_shake_rattle!(ps, forces, 0.01, cons)
+end
+
+d = ps.positions[1,:] .- ps.positions[2,:]
+@show norm(d)  # ~1.0
+```
+
+This integrator:
+1. Updates velocities (half step) and positions (drift).
+2. Applies **SHAKE** projection to enforce bond lengths.
+3. Recomputes forces.
+4. Completes velocity update.
+5. Applies **RATTLE** projection to enforce velocity constraints.
+
+## Degrees of Freedom
+
+Constraints reduce the effective number of degrees of freedom (DoF).
+The [`degrees_of_freedom`](@ref) function accounts for:
+
+- number of atoms × dimensions
+- minus one per constraint
+- minus dimensions if COM motion is removed
+
+```@example constraints
+N, D = 3, 3
+ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
+cons = DistanceConstraints([(1,2)], [1.0])
+dof = degrees_of_freedom(ps; constraints=cons, remove_com=true)
+@show dof
+```
+
+Correct DoF is essential for unbiased temperature and pressure estimators.
+
+## Removing Center-of-Mass Motion
+
+Use [`remove_com_motion!`](@ref) to zero the mass-weighted center-of-mass velocity or position.
+This prevents unphysical drift of the entire system.
+
+```@example constraints
+N, D = 3, 3
+ps = ParticleSystem(zeros(N,D), zeros(N,D), [1.0, 2.0, 3.0])
+ps.velocities .= 1.0
+remove_com_motion!(ps; which=:velocity)
+# After removal, COM velocity should be ~0
+Vcom = sum(ps.masses .* ps.velocities[:,1]) / sum(ps.masses)
+@show Vcom
+```
+
+## Performance Notes
+
+- SHAKE/RATTLE typically converge in a few iterations for tree-like molecules.
+- For rings or stiff networks, increase `maxiter` or relax `tol`.
+- Always monitor constraint residuals if using larger timesteps.
+- Thermostat steps that randomize velocities should be followed by `apply_rattle!`.
+
+## Common Pitfalls
+
+- Constraints assume well-defined molecular topology. If your system uses PBC,
+
+  * ensure constrained atoms belong to the same molecule and do not cross cell
+    boundaries unexpectedly.
+  * A too-tight tolerance can lead to slow or failed convergence.
+  * DoF reduction is essential: forgetting to pass `constraints` or `remove_com`
+    to [`degrees_of_freedom`](@ref) will bias temperature estimates.
+
+## Further Reading
+
+- Ryckaert, Ciccotti & Berendsen (1977), *Numerical integration of the Cartesian
+  equations of motion of a system with constraints: molecular dynamics of n-alkanes*,
+  J. Comp. Phys. 23(3).
+- Andersen (1983), *RATTLE: A "velocity" version of the SHAKE algorithm for
+  molecular dynamics calculations*, J. Comp. Phys. 52(1).
+
+These classical references describe the original SHAKE and RATTLE algorithms
+implemented here.
+
+## See Also
+
+- [`ParticleSystem`](@ref): container for positions, velocities, and masses.
+- [`velocity_verlet!`](@ref): unconstrained Velocity-Verlet integrator.
+- [`degrees_of_freedom`](@ref): count effective translational degrees of freedom.
+- [`remove_com_motion!`](@ref): eliminate center-of-mass drift.
+
+For thermostatting with constraints, project velocities with
+[`apply_rattle!`](@ref) after randomization steps to remain on the constraint manifold.
+
+## Next Steps
+
+You can now combine constrained dynamics with neighbor lists, Lennard-Jones forces,
+and thermostats. See the [Forces & Potentials](@ref) guide for force field setup.
+
+---
+
+**Summary:** SHAKE/RATTLE constraints in Verlet.jl let you simulate rigid bonds,
+stabilize molecules, and safely increase integration timesteps. Use them with care,
+monitor convergence, and adjust tolerances as needed.
