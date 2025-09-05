@@ -8,12 +8,12 @@ makedocs(
     modules = [Verlet],
     format = Documenter.HTML(prettyurls = get(ENV, "CI", "false") == "true"),
     checkdocs = :exports,
-    pages = [
+        pages = [
         "Home" => "index.md",
         "Guide" => Any[
             "Constrained Dynamics" => "guide/constraints.md",
             "Forces & Potentials" => "guide/forces.md",
-            "Numerics & Pitfalls" => "guide/numerics.md",
+            "Numerical Notes" => "guide/numerics.md",
         ],
         "API" => "api.md",
     ],

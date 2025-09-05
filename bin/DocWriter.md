@@ -1,7 +1,7 @@
 ## 📚 Doc Writer Prompt
 ```
 
-You are the **Doc Writer**. Your job is to generate user-facing documentation for new features outlined in the current Design iteration.
+You are the **Doc Writer** of the MD package Verlet. Your job is to generate user-facing documentation for new features outlined in the current Design iteration.
 
 Your job:
 
@@ -35,22 +35,18 @@ Will build the docs. Similarly you can inspect the code.
 # Design
 # DESIGN.md — Next Feature Plan
 
-## Overview — **Holonomic Distance Constraints (SHAKE/RATTLE) + COM Drift Removal**
+## Overview — **Constraint-Aware BAOAB (cBAOAB) + Residual Monitoring**
 
-With neighbor lists, LJ + PBC, and an NVT (BAOAB) thermostat on deck, the next capability that unlocks **larger stable timesteps** and **molecular realism** is support for **holonomic distance constraints** (e.g., rigid bonds to H). We’ll implement classical **SHAKE** (position projection) and **RATTLE** (velocity projection) for **pairwise distance constraints**, plus a light utility to **remove center-of-mass (COM) drift**.
+We now have working SHAKE/RATTLE and an unconstrained BAOAB thermostat. The natural next step is a **constrained Langevin integrator** that preserves holonomic distance constraints while sampling NVT:
+
+* Implement **cBAOAB**: a BAOAB step that inserts **SHAKE** after position updates and **RATTLE** after velocity updates so that constraints remain satisfied despite stochastic kicks.
+* Add a light utility for **constraint residual monitoring** (max norm and RMS) to aid debugging and regression tests.
+* Keep scope tight: pairwise **DistanceConstraints** only (as already implemented), orthorhombic box support optional but consistent with minimum-image logic already present.
 
 Benefits:
 
-* Enable typical “rigid bonds to H” workflows and **increase `dt`** (e.g., from 1 fs → 2 fs equivalents in reduced units).
-* Provide a clean path to rigid molecules (e.g., TIP3P water via distance-only constraints first; angle/SETTLE can come later).
-* Integrate with existing integrators; provide a **constrained VV** driver and a **constraint-aware DoF** for temperature tools.
-
-Scope (tight, non-breaking):
-
-* New `constraints.jl` module with a minimal `DistanceConstraints` struct.
-* `velocity_verlet_shake_rattle!` integrator (wrapper over current VV) that applies SHAKE/RATTLE.
-* Update `degrees_of_freedom` to account for constraints (optionally COM removal).
-* Utility: `remove_com_motion!` (mass-weighted).
+* Correct NVT sampling for systems with rigid bonds (e.g., water) while keeping the same user-facing force callback.
+* Compatibility with existing `DistanceConstraints` and DoF accounting.
 
 ---
 
@@ -58,280 +54,187 @@ Scope (tight, non-breaking):
 
 ```julia
 """
-    DistanceConstraints(pairs, lengths; tol=1e-8, maxiter=50, use_minimum_image=true)
+    langevin_baoab_constrained!(ps::ParticleSystem, forces, dt, cons::DistanceConstraints;
+                                γ, T, kB=1.0, rng=Random.default_rng())
 
-Create a distance-constraint set:
-- pairs::Vector{Tuple{Int,Int}}: constrained atom index pairs (1-based)
-- lengths::Vector{Float64}: target distances (same units as positions)
-- tol: max |constraint violation| tolerated for convergence (in length^2)
-- maxiter: maximum SHAKE and RATTLE iterations per step
-- use_minimum_image: if true, constraints use minimum-image displacement under PBC
+Advance one **constrained NVT** BAOAB step with SHAKE/RATTLE projections.
 """
-struct DistanceConstraints end  # concrete fields described below
-DistanceConstraints(pairs, lengths; tol=1e-8, maxiter=50, use_minimum_image=true)
+langevin_baoab_constrained!(ps, forces, dt, cons; γ, T, kB=1.0, rng=Random.default_rng())
 
 """
-    velocity_verlet_shake_rattle!(ps::ParticleSystem, forces, dt, cons::DistanceConstraints)
+    constraint_residuals(ps, cons::DistanceConstraints) -> (; maxC, rmsC, maxCd, rmsCd)
 
-Advance one constrained step:
-1) VV half-kick, drift
-2) SHAKE position projection
-3) Recompute forces
-4) VV half-kick
-5) RATTLE velocity projection
+Return current position and velocity constraint residuals:
+- C_l = ||r_i - r_j||^2 - r0_l^2
+- Ċ_l = 2 (r_i - r_j) ⋅ (v_i - v_j)
 """
-velocity_verlet_shake_rattle!(ps, forces, dt, cons)
-
-"""
-    apply_shake!(ps::ParticleSystem, cons::DistanceConstraints, dt)
-
-Project positions to satisfy all constraints (used inside integrators).
-"""
-apply_shake!(ps, cons, dt)
-
-"""
-    apply_rattle!(ps::ParticleSystem, cons::DistanceConstraints)
-
-Project velocities to satisfy the differential constraints d/dt C_l = 0.
-"""
-apply_rattle!(ps, cons)
-
-"""
-    degrees_of_freedom(ps; constraints=nothing, remove_com=false) -> Int
-
-Return the effective translational DoF given optional constraints and COM removal.
-"""
-degrees_of_freedom(ps; constraints=nothing, remove_com=false) -> Int
-
-"""
-    remove_com_motion!(ps; which=:velocity)
-
-Remove center-of-mass motion:
-- which = :velocity | :position | :both
-"""
-remove_com_motion!(ps; which=:velocity)
+constraint_residuals(ps, cons)
 ```
 
 **Exports (add):**
 
 ```julia
-export DistanceConstraints,
-       velocity_verlet_shake_rattle!,
-       apply_shake!, apply_rattle!,
-       remove_com_motion!
-# `degrees_of_freedom` is already exported; extend its method with kwargs.
+export langevin_baoab_constrained!, constraint_residuals
 ```
 
-**Files (new/updated):**
+**Files (updated):**
 
-* `src/constraints.jl` — all constraint types & algorithms.
-* `src/Verlet.jl` — `include("constraints.jl")`, export new symbols, extend `degrees_of_freedom`.
+* `src/thermostats.jl` — add `langevin_baoab_constrained!`.
+* `src/constraints.jl` — add `constraint_residuals`.
+* `src/Verlet.jl` — export new symbols.
 
 ---
 
 ## Data Structures
 
-```julia
-struct DistanceConstraints
-    i::Vector{Int}          # first atom index per constraint
-    j::Vector{Int}          # second atom index per constraint
-    r0::Vector{Float64}     # target distances per constraint
-    tol::Float64            # convergence tolerance on |C_l|
-    maxiter::Int            # maximum iterations
-    use_minimum_image::Bool # apply minimum-image to displacement vectors
-end
-```
+No new structs. Reuse:
 
-* **Mutability:** keep `DistanceConstraints` **immutable** (parameters). All corrections are applied to `ParticleSystem` in place.
-* **Masses:** read from `ps.masses`.
-* **Box / PBC:** assume an orthorhombic box already exists in the codebase; if not, use raw positions and set `use_minimum_image=false` (documented).
+```julia
+DistanceConstraints  # immutable parameters; fields already implemented
+ParticleSystem       # positions, velocities, masses
+```
 
 ---
 
 ## Algorithms
 
-### Constraints
+### Constrained BAOAB (cBAOAB)
 
-Each distance constraint `l` ties atoms `i,j` with
+We follow the BAOAB splitting with **projections**:
 
-```
-C_l(r) = ||r_i - r_j||^2 - r0_l^2 = 0.
-```
+Let `B` = half kick (deterministic), `A` = half drift (positions), `O` = OU stochastic velocity step.
 
-#### SHAKE (positions)
+We insert:
 
-After the unconstrained drift, we correct positions with Lagrange multipliers `{λ_l}`:
+* **After each A:** `apply_shake!` (positions)
+* **After each B or O:** `apply_rattle!` (velocities)
 
-For constraint `l` with `d_ij = r_i - r_j` (use minimum image if requested),
-
-```
-σ_l = (1/m_i + 1/m_j) * (d_ij ⋅ d_ij)
-Δλ_l = - C_l(r) / (2 * σ_l)
-Δr_i =  (Δλ_l / m_i) * d_ij
-Δr_j = -(Δλ_l / m_j) * d_ij
-```
-
-Apply Gauss–Seidel style updates **iteratively** over all constraints until:
+Step:
 
 ```
-max_l |C_l(r)| ≤ tol   or   iterations ≥ maxiter
+Inputs: ps = (R, V, m), forces, dt, γ, T, kB, rng, cons
+
+1) B (half kick):           V ← V + (dt/2) * F(R) ./ m
+   RATTLE (velocities):     apply_rattle!(ps, cons)          # keep Ċ = 0
+
+2) A (half drift):          R ← R + (dt/2) * V
+   SHAKE (positions):       apply_shake!(ps, cons, dt/2)
+
+3) O (OU stochastic):
+   c = exp(-γ*dt)
+   for each particle i, component k:
+       V[i,k] ← c * V[i,k] + sqrt((1-c^2) * kB*T / m_i) * ξ
+   RATTLE (velocities):     apply_rattle!(ps, cons)
+
+4) A (half drift):          R ← R + (dt/2) * V
+   SHAKE (positions):       apply_shake!(ps, cons, dt/2)
+
+5) Recompute forces:        F ← forces(R)
+
+6) B (half kick):           V ← V + (dt/2) * F ./ m
+   RATTLE (velocities):     apply_rattle!(ps, cons)
+
+Return ps
 ```
 
-**Notes:**
+Notes:
 
-* Use current `d_ij` each sub-iteration (Gauss–Seidel converges better than Jacobi).
-* If `σ_l` is extremely small (atoms nearly coincident), abort with a descriptive error.
-* With PBC, compute `d_ij` via minimum image, but apply corrections to wrapped positions directly (positions should remain inside the primary cell; the constraint is topologically within a molecule, so this is physically consistent).
+* We reuse the existing `_ou_coeff` small-x safeguard (`c ≈ 1 − γdt`) as in the unconstrained BAOAB.
+* The `dt` argument passed to `apply_shake!` is not mathematically required but can be used for diagnostics; we keep the signature consistent with the existing function.
+* Convergence tolerances and iteration caps come from `cons`.
 
-#### RATTLE (velocities)
+### Residuals
 
-Enforce the velocity constraint
-
-```
-d/dt C_l = 2 d_ij ⋅ (v_i - v_j) = 0.
-```
-
-Solve for `μ_l` and correct velocities:
+For each constraint `l` with indices `(i,j)` and displacement `d_ij = r_i − r_j` (with minimum image if enabled):
 
 ```
-τ_l = (1/m_i + 1/m_j) * (d_ij ⋅ d_ij)
-μ_l = - (d_ij ⋅ (v_i - v_j)) / τ_l
-Δv_i =  (μ_l / m_i) * d_ij
-Δv_j = -(μ_l / m_j) * d_ij
+C_l  = dot(d_ij, d_ij) − r0_l^2
+Ċ_l = 2 * dot(d_ij, v_i − v_j)
 ```
 
-Iterate over constraints until `max_l |d_ij ⋅ (v_i - v_j)| ≤ tol_v`, with `tol_v` tied to `tol` (e.g., `tol_v = tol^(1/2)`), or reuse `tol` for simplicity.
-
-#### Constrained VV driver
+Aggregate:
 
 ```
-# B
-v  ← v + (dt/2) * a(r)
-# A
-r  ← r + dt * v
-# SHAKE
-apply_shake!(ps, cons, dt)
-# recompute forces at corrected r
-a  ← F(r) ./ m
-# B
-v  ← v + (dt/2) * a
-# RATTLE (velocities)
-apply_rattle!(ps, cons)
+maxC  = maximum(abs, C_l)
+rmsC  = sqrt(mean(C_l.^2))
+maxCd = maximum(abs, Ċ_l)
+rmsCd = sqrt(mean(Ċ_l.^2))
 ```
 
-This driver preserves the geometric constraints to within tolerances and is compatible with the current force callback.
-
-> **Thermostat compatibility:** If combining with Langevin (BAOAB), the O-step (stochastic OU) should be followed by a **RATTLE projection** of velocities to keep constraints satisfied. For this first iteration, we ship the **constrained VV** path; extending BAOAB with RATTLE is a follow-up.
-
-### degrees\_of\_freedom with constraints
-
-Let `N`, `D`, and `C = length(cons.r0)`. Then
-
-```
-dof = N*D - C
-if remove_com
-   dof -= D
-end
-dof = max(dof, 0)
-```
-
-This integrates with `instantaneous_temperature(ps; kB)`.
-
-### remove\_com\_motion!
-
-Mass-weighted COM velocity:
-
-```
-Vcom = (Σ m_i v_i) / (Σ m_i)
-v_i ← v_i - Vcom
-```
-
-Optionally also recenter positions similarly (for non-PBC use).
+Return as a named tuple.
 
 ---
 
 ## Numerical Pitfalls
 
-* **Convergence:** Tight `tol` with complex constraint networks (e.g., rings) can require many iterations. Expose `maxiter` and return a clear error if not converged.
-* **Ill-conditioning:** Very small `σ_l` (near-zero bond length or coincident atoms) leads to numerical blow-up; detect and abort early.
-* **PBC displacement:** Minimum-image must be used **consistently** for `d_ij`. If constraints span a molecule that crosses a boundary, ensure unwrapped molecular coordinates are conceptually consistent. For now we assume constraints occur within a molecule and the minimum-image choice is valid.
-* **Thermostats:** Any velocity randomization step must be followed by **RATTLE** to avoid drift off the constraint manifold.
-* **DoF accounting:** When constraints are active (and optionally COM removal), temperature estimators and barostats must use the **reduced DoF** to avoid biased thermodynamics.
-* **Large dt:** Constraints allow larger `dt` but do not make dynamics unconditionally stable; monitor energy and constraint residuals.
+* **Projection frequency:** Omitting RATTLE after `O` will cause constraint drift in velocities. The proposed placements keep both `C` and `Ċ` small.
+* **Tol/γ interaction:** Larger friction and temperature produce larger raw OU kicks; ensure `cons.tol` and `maxiter` are adequate to re-project. Users can relax `tol` slightly for high-T runs if needed.
+* **Mass variance:** RATTLE uses `1/m_i` weights; extremely small masses (e.g., constrained hydrogens) can slow convergence if constraints are highly coupled. This is expected and acceptable for simple pair constraints.
+* **DoF accounting:** `instantaneous_temperature` currently calls `degrees_of_freedom(ps)` (no kwargs). For constrained NVT runs, **document** that users should compute temperature using
+  `degrees_of_freedom(ps; constraints=cons, remove_com=false)` if they want manual diagnostics. (We keep the API stable; no hidden global state.)
+* **Random number reproducibility:** OU step uses `rng`. Tests should set a seed.
 
 ---
 
 ## Acceptance Tests
 
-Add `test/test_constraints.jl` and include from `test/runtests.jl`.
+Add `test/test_cbaoab.jl` and include from `test/runtests.jl`.
 
 ```julia
-@testset "DistanceConstraints basics" begin
-    # Diatomic, 3D, one constraint
-    N, D = 2, 3
-    r0 = 1.25
-    ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
-    ps.positions[1,1] = 0.0
-    ps.positions[2,1] = r0 + 0.1               # slight violation
-    cons = DistanceConstraints([(1,2)], [r0]; tol=1e-10, maxiter=100)
-
-    apply_shake!(ps, cons, 0.01)
-    d = ps.positions[1,:] .- ps.positions[2,:]
-    @test isapprox(norm(d), r0; rtol=0, atol=1e-8)
-end)
-
-@testset "RATTLE projects velocities" begin
-    N, D = 2, 3
+@testset "cBAOAB preserves constraints (zero forces)" begin
+    N, D = 3, 3
     r0 = 1.0
     ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
-    ps.positions[1,1] = 0.0
     ps.positions[2,1] = r0
-    cons = DistanceConstraints([(1,2)], [r0])
+    cons = DistanceConstraints([(1,2)], [r0]; tol=1e-10, maxiter=200)
 
-    # Give violating relative velocity along the bond
-    ps.velocities[1,1] =  +0.3
-    ps.velocities[2,1] =  -0.1
-    apply_rattle!(ps, cons)
-    d = ps.positions[1,:] .- ps.positions[2,:]
-    vrel = ps.velocities[1,:] .- ps.velocities[2,:]
-    @test isapprox(dot(d, vrel), 0.0; atol=1e-10)
-end)
+    forces(R) = zero(R)
+    dt, γ, T = 0.01, 1.0, 0.5
+    rng = MersenneTwister(1234)
 
-@testset "Constrained VV holds bond length" begin
-    # Zero external forces: constraint should keep distance fixed over many steps
-    N, D = 2, 3
-    r0 = 0.75
-    ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
-    ps.positions[2,1] = r0
-    ps.velocities .= 0.01                         # small motion
-    cons = DistanceConstraints([(1,2)], [r0]; tol=1e-10, maxiter=100)
-    dt = 0.02
-    forces(R) = zero(R)                           # no forces
-
-    for _ in 1:500
-        velocity_verlet_shake_rattle!(ps, forces, dt, cons)
+    # Warmup and integrate
+    for _ in 1:1000
+        langevin_baoab_constrained!(ps, forces, dt, cons; γ=γ, T=T, rng=rng)
     end
+
     d = ps.positions[1,:] .- ps.positions[2,:]
-    @test isapprox(norm(d), r0; atol=1e-7)
+    @test isapprox(norm(d), r0; atol=1e-6)
+
+    # Velocity residual should be tiny
+    (; maxC, maxCd) = constraint_residuals(ps, cons)
+    @test maxC ≤ 1e-8
+    @test maxCd ≤ 1e-8
 end)
 
-@testset "degrees_of_freedom with constraints and COM" begin
-    N, D = 5, 3
-    pairs = [(1,2), (3,4)]
-    r0s = [1.0, 1.5]
-    cons = DistanceConstraints(pairs, r0s)
-    ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
-    @test degrees_of_freedom(ps; constraints=cons, remove_com=false) == N*D - length(pairs)
-    @test degrees_of_freedom(ps; constraints=cons, remove_com=true)  == N*D - length(pairs) - D
+@testset "cBAOAB temperature sane and finite" begin
+    N, D = 8, 3
+    ps = ParticleSystem(randn(N,D), zeros(N,D), ones(N))
+    cons = DistanceConstraints([(1,2)], [1.0])
+    forces(R) = zero(R)
+    dt, γ, T = 0.005, 2.0, 1.2
+    rng = MersenneTwister(7)
+
+    # Run; measure running average temperature
+    accT = 0.0
+    steps = 5000
+    for n in 1:steps
+        langevin_baoab_constrained!(ps, forces, dt, cons; γ=γ, T=T, rng=rng)
+        accT += instantaneous_temperature(ps; kB=1.0)
+    end
+    Tbar = accT / steps
+    @test isfinite(Tbar)
+    # Loose bound (small system; not asserting equality to T)
+    @test 0.2 ≤ Tbar ≤ 3.0
 end)
 
-@testset "remove_com_motion! removes mass-weighted COM velocity" begin
-    N, D = 3, 3
-    ps = ParticleSystem(zeros(N,D), zeros(N,D), [1.0, 2.0, 3.0])
-    ps.velocities .= 1.0
-    remove_com_motion!(ps; which=:velocity)
-    Vcom = (sum(ps.masses .* ps.velocities[:,1])) / sum(ps.masses)
-    @test isapprox(Vcom, 0.0; atol=1e-14)
+@testset "constraint_residuals reports zero at exact satisfaction" begin
+    ps = ParticleSystem([0.0 0 0; 1.0 0 0], zeros(2,3), ones(2))
+    cons = DistanceConstraints([(1,2)], [1.0])
+    (; maxC, rmsC, maxCd, rmsCd) = constraint_residuals(ps, cons)
+    @test maxC == 0.0
+    @test rmsC == 0.0
+    @test maxCd == 0.0
+    @test rmsCd == 0.0
 end)
 ```
 
@@ -339,35 +242,24 @@ end)
 
 ## Implementation Notes
 
-* Use `@views` and in-place updates; avoid temporary allocations in inner loops.
-* Iterate constraints Gauss–Seidel style for better convergence; 2–5 sweeps usually suffice for simple molecules.
-* Factor out a helper that computes `d_ij` (with minimum image if `use_minimum_image=true`) to keep code DRY.
-* Keep `tol` on the squared constraint `|C_l|` (units length²). When checking `||r_i - r_j||`, convert appropriately.
-* Extend `degrees_of_freedom` method to accept `constraints` and `remove_com` kwargs; keep old method for backward compatibility.
+* Place the projections exactly as specified; avoid “batching” multiple OU kicks between projections.
+* Reuse allocation-free patterns (`@views`, in-place ops). Use the same `invm = 1.0 ./ m` approach as in existing code.
+* `constraint_residuals` must honor `use_minimum_image` and share the `_displacement!` helper from `constraints.jl` to avoid code duplication.
 
 ---
 
 ## Task for Implementer (small & focused)
 
-1. Create `src/constraints.jl` with:
-
-   * `struct DistanceConstraints` (fields as above) + constructor.
-   * `apply_shake!`, `apply_rattle!` implementing the formulas and iterations described.
-   * `velocity_verlet_shake_rattle!` that wraps existing VV steps and calls SHAKE/RATTLE appropriately.
-   * `remove_com_motion!` (mass-weighted).
-2. Extend `degrees_of_freedom(ps; constraints=nothing, remove_com=false)` in `src/thermostats.jl` (or a shared util) to account for constraints/COM.
-3. `include("constraints.jl")` and export new symbols in `src/Verlet.jl`.
-4. Add `test/test_constraints.jl` with the Acceptance Tests above and include from `test/runtests.jl`.
-5. Ensure docstrings reference units and PBC options; add method signatures to the main README brief.
+1. **Add** `langevin_baoab_constrained!` to `src/thermostats.jl` following the algorithm above (B/half → RATTLE → A/half → SHAKE → O → RATTLE → A/half → SHAKE → recompute F → B/half → RATTLE).
+2. **Add** `constraint_residuals(ps, cons)` to `src/constraints.jl` using the same minimum-image logic as `_displacement!`.
+3. **Wire up** exports in `src/Verlet.jl`.
+4. **Tests:** create `test/test_cbaoab.jl` with the Acceptance Tests and include it from `test/runtests.jl`.
+5. **Docs:** briefly note in the BAOAB docstring that with constraints one should use `langevin_baoab_constrained!`.
 
 ---
 
 ## To-Do’s for Documenter
 
-* **Guide → Constraints:** Short page “Constrained Dynamics (SHAKE/RATTLE)” with:
-
-  * When to use constraints; typical `dt` gains and caveats.
-  * Minimal example constructing `DistanceConstraints` for a small molecule and running `velocity_verlet_shake_rattle!`.
-  * Interplay with temperature: explain the **reduced DoF**.
-* **API Reference:** `DistanceConstraints`, `apply_shake!`, `apply_rattle!`, `velocity_verlet_shake_rattle!`, `remove_com_motion!`, updated `degrees_of_freedom`.
-* **Numerics Notes:** Tips on convergence (`tol`, `maxiter`), and PBC minimum image implications for intramolecular constraints.
+* **Guide → Constraints:** Add a short subsection “Constrained NVT (cBAOAB)” explaining where the projections are applied and why.
+* **API Reference:** Document `langevin_baoab_constrained!` and `constraint_residuals`.
+* **Numerics Notes:** Brief paragraph on the interplay of `γ`, `T`, and `cons.tol` and recommended tolerances.

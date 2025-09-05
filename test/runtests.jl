@@ -15,4 +15,5 @@ include("test_thermostats.jl")
 
 # Constraints tests
 include("test_constraints.jl")
+	include("test_cbaoab.jl")
 

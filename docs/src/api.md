@@ -37,6 +37,8 @@ langevin_baoab!
 instantaneous_temperature
 degrees_of_freedom
 velocity_rescale!
+langevin_baoab_constrained!
+constraint_residuals
 ```
 
 ## Notes

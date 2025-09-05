@@ -3,6 +3,7 @@ using LinearAlgebra
 
 # Public API exports (implementations live in separate files)
 export ParticleSystem, velocity_verlet!, kinetic_energy, potential_energy
+export langevin_baoab_constrained!, constraint_residuals
 export CubicBox, minimum_image!, wrap_positions!, lj_forces
 export NeighborList, build_neighborlist, maybe_rebuild!, max_displacement_since_build
 export CellGrid, build_cellgrid, rebin!, build_neighborlist_cells
@@ -17,7 +18,7 @@ include("forces.jl")
 include("cellgrid.jl")
 include("neighborlist_cells.jl")
 include("neighborlist.jl")
-include("thermostats.jl")
 include("constraints.jl")
+include("thermostats.jl")
 
 end # module Verlet

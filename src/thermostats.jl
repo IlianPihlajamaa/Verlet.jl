@@ -263,3 +263,67 @@ function langevin_baoab!(ps, forces, dt; γ, T, kB::Real=1.0, rng::AbstractRNG=R
 
     return ps
 end
+
+# ------------------------------------------------------------
+# Constrained Langevin (BAOAB with SHAKE/RATTLE projections)
+# ------------------------------------------------------------
+"""
+    langevin_baoab_constrained!(ps::ParticleSystem, forces, dt, cons::DistanceConstraints;
+                                γ, T, kB=1.0, rng=Random.default_rng())
+
+Advance one **constrained NVT** BAOAB step with SHAKE/RATTLE projections.
+
+Splitting and projections:
+
+1. B (half kick)         → `apply_rattle!` (velocities)
+2. A (half drift)        → `apply_shake!` (positions)
+3. O (OU stochastic)     → `apply_rattle!` (velocities)
+4. A (half drift)        → `apply_shake!` (positions)
+5. Recompute forces
+6. B (half kick)         → `apply_rattle!` (velocities)
+
+Notes:
+- Uses `exp(-γ*dt)` for the OU decay. Noise variance is `(1 - c^2) * kB*T / m_i` per component.
+- With constraints, prefer this method over the unconstrained `langevin_baoab!`.
+"""
+function langevin_baoab_constrained!(ps::ParticleSystem, forces, dt, cons::DistanceConstraints;
+                                     γ, T, kB::Real=1.0, rng=Random.default_rng())
+    @assert dt > 0
+    R = ps.positions
+    V = ps.velocities
+    m = ps.masses
+    # Per-particle inverse masses (broadcast across velocity components)
+    invm = 1.0 ./ m
+
+    # Initial forces
+    F = forces(R)
+
+    # --- B: half kick
+    V .+= (dt/2) .* (F .* invm)
+    apply_rattle!(ps, cons)  # enforce Ċ = 0
+
+    # --- A: half drift
+    R .+= (dt/2) .* V
+    apply_shake!(ps, cons, dt/2)  # enforce C = 0
+
+    # --- O: OU stochastic velocity step
+    c = exp(-γ*dt)
+    ξ = randn(rng, size(V))
+    σ = sqrt.((1 - c^2) .* (kB .* T) .* invm)  # per-particle row scale
+    V .= c .* V .+ ξ .* σ
+    apply_rattle!(ps, cons)
+
+    # --- A: half drift
+    R .+= (dt/2) .* V
+    apply_shake!(ps, cons, dt/2)
+
+    # Recompute forces at new positions
+    F = forces(R)
+
+    # --- B: half kick
+    V .+= (dt/2) .* (F .* invm)
+    apply_rattle!(ps, cons)
+
+    return ps
+end
+

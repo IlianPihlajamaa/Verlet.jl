@@ -138,3 +138,66 @@ function remove_com_motion!(ps; which=:velocity)
     end
     return ps
 end
+
+# ------------------------------------------------------------
+# Constraint residual monitoring (docstring and example)
+# ------------------------------------------------------------
+"""
+    constraint_residuals(ps::ParticleSystem, cons::DistanceConstraints) -> (; maxC, rmsC, maxCd, rmsCd)
+
+Compute the constraint residuals for a system subject to pairwise distance constraints.
+
+For each constraint `l` with atoms `(i, j)` and target distance `r0_l`:
+
+- Position residual: `C_l = ||r_i - r_j||^2 - r0_l^2`
+- Velocity residual: `Ċ_l = 2 (r_i - r_j) ⋅ (v_i - v_j)`
+
+Returns a named tuple with `maxC`, `rmsC`, `maxCd`, `rmsCd`.
+
+Example
+```julia
+ps = ParticleSystem([0.0 0 0; 1.0 0 0], zeros(2,3), ones(2))
+cons = DistanceConstraints([(1,2)], [1.0])
+constraint_residuals(ps, cons)
+```
+"""
+function constraint_residuals(ps, cons::DistanceConstraints)
+    R = ps.positions
+    V = ps.velocities
+
+    # Use the actual fields of DistanceConstraints
+    is = cons.i
+    js = cons.j
+    lengths = cons.r0
+
+    L = length(is)
+    maxC  = 0.0
+    maxCd = 0.0
+    accC2  = 0.0
+    accCd2 = 0.0
+
+    D = size(R, 2)
+    d = zeros(eltype(R), D)
+
+    for ℓ in 1:L
+        i = is[ℓ]
+        j = js[ℓ]
+        @views ri = R[i, :]
+        @views rj = R[j, :]
+        _displacement!(d, ri, rj, cons)
+        @views vij = V[i, :] .- V[j, :]
+
+        r0 = lengths[ℓ]
+        Cl = dot(d, d) - r0^2
+        Cdl = 2.0 * dot(d, vij)
+
+        maxC  = max(maxC,  abs(Cl))
+        maxCd = max(maxCd, abs(Cdl))
+        accC2  += Cl^2
+        accCd2 += Cdl^2
+    end
+
+    rmsC  = L == 0 ? 0.0 : sqrt(accC2  / L)
+    rmsCd = L == 0 ? 0.0 : sqrt(accCd2 / L)
+    return (; maxC, rmsC, maxCd, rmsCd)
+end

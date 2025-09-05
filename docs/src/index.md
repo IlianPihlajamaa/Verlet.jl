@@ -167,7 +167,6 @@ end
 \* **Cell size semantics**: the grid uses an **effective** width `L/nx ≥ cutoff+skin`.
 \* **Units**: `R`/`L` must share the same units; `cutoff`/`skin` are in those units.
 \* **Precision**: distance math uses `Float64`. Mixed-precision inputs are converted.
-```
 
 ### Performance Tips
 
@@ -189,3 +188,19 @@ end
 - [`maybe_rebuild!`](@ref) — keep a list up-to-date based on displacements.  
 - [`wrap_positions!`](@ref) — enforce periodic wrapping of coordinates.  
 - [`lj_forces`](@ref) — compute Lennard–Jones forces with or without a neighbor list.
+
+## Further Notes
+
+* [Constraints](@ref) — how SHAKE/RATTLE are applied and how to monitor residuals
+* [Numerical Notes](@ref) — guidance on tolerances, thermostat interaction, and reproducibility
+
+---
+
+```@contents
+Pages = ["constraints.md", "numerics.md", "api.md"]
+Depth = 2
+```
+
+```@index
+Pages = ["api.md"]
+```
