@@ -1,7 +1,7 @@
 ## 📚 Doc Writer Prompt
 ```
 
-You are the **Doc Writer**. Your job is to generate user-facing documentation for new features.
+You are the **Doc Writer**. Your job is to generate user-facing documentation for new features outlined in the current Design iteration.
 
 Your job:
 
@@ -10,6 +10,7 @@ Your job:
 * It should produce a valid documentation site with Documenter.jl
 * Ensure examples are runnable Julia code snippets, perhaps with @example blocks
 * Highlight performance tips, units, and pitfalls.
+* Your goal is to write a unified diff patch (with \\\diff fencing) showing exactly what changes to apply. Ensure the docs build.
 
 Rules:
 
@@ -30,133 +31,254 @@ Will provide the output of the tests. Similarly you can test building the docume
 * Always assume your working directory is the root of the package.
 
 # Design
+# DESIGN.md — Next Feature Plan
 
-# DESIGN.md
+## Overview — Add Periodic Box + Lennard–Jones Forces (O(N²))
 
-## Overview
+To run physically meaningful MD, we need **inter-particle forces** and **boundary conditions**.
+Next step: implement a **cubic periodic box** with **minimum-image** convention and a standard **Lennard–Jones (LJ) pair potential** with optional cutoff. This unlocks simple fluids, sanity checks for energy conservation, and a base for future optimizations (neighbor lists, cell lists, PME, etc.).
 
-The package `Verlet` is currently just a skeleton Julia package with a `greet()` function.
-The first meaningful feature should be to implement a **basic velocity Verlet integrator** for molecular dynamics (MD).
-This integrator is the foundation of MD simulations and provides a stable and symplectic method for integrating Newton’s equations of motion.
+Scope is intentionally minimal and self-contained:
 
-Why:
+* **Data type** for cubic box.
+* **Utility** to apply minimum-image displacement.
+* **Force provider** `lj_forces` compatible with the existing `forces(r; return_potential=true)` convention used by `potential_energy`.
 
-* It transforms the project from a skeleton into a minimal working MD engine.
-* Establishes core data structures (particles, forces).
-* Enables first example/test simulations.
+No neighbor list yet (keep it small and clear).
 
 ---
 
 ## Public API
 
-### Module: `Verlet`
+### New types
 
-#### Structs
+* `struct CubicBox{T<:Real}`
 
-* `ParticleSystem`
+  * `L::T` — box length (same in all dimensions).
 
-  * Represents a collection of particles, their positions, velocities, and masses.
+### New functions
 
-#### Functions
+* `minimum_image!(Δ::AbstractVector, box::CubicBox)`
 
-* `velocity_verlet!(system::ParticleSystem, forces::Function, dt::Float64)`
+  * In-place minimum-image wrap of a displacement vector `Δ` so each component lies in `(-L/2, L/2]`.
 
-  * Advances the particle system one step using the velocity Verlet algorithm.
-* `kinetic_energy(system::ParticleSystem) -> Float64`
+* `lj_forces(positions::AbstractMatrix, box::CubicBox;
+             ϵ::Real=1.0, σ::Real=1.0, rcut::Real=Inf,
+             shift::Bool=false, return_potential::Bool=false)`
 
-  * Computes the total kinetic energy.
-* `potential_energy(system::ParticleSystem, forces::Function) -> Float64`
+  * Returns an `(N×D)` force matrix; if `return_potential=true`, returns `(F, U::Float64)`.
+  * **Pair potential:**
+    $U(r) = 4\varepsilon \left[(\sigma/r)^{12} - (\sigma/r)^6\right]$
+  * **Pair force magnitude along $\hat r$:**
+    $f(r) = 24\varepsilon \left[2(\sigma/r)^{12} - (\sigma/r)^6\right]/r$
+  * **Cutoff:** include pairs with `r ≤ rcut`.
+    If `shift=true`, add a constant so that $U(rcut)=0$ (energy continuity); **no force smoothing** (derivative discontinuity remains).
 
-  * Computes the total potential energy (if available from force function).
+These are **not exported** unless you prefer; suggested exports:
+
+```julia
+export CubicBox, minimum_image!, lj_forces
+```
 
 ---
 
 ## Data Structures
 
 ```julia
-mutable struct ParticleSystem
-    positions::Matrix{Float64}   # (N × D) array, N particles in D dimensions
-    velocities::Matrix{Float64}  # (N × D)
-    masses::Vector{Float64}      # length N
+struct CubicBox{T<:Real}
+    L::T  # box length
 end
 ```
 
-* **mutability**: Needed so that the integrator can update positions and velocities in-place.
-* **dimensions**: Generalized for 1D, 2D, or 3D simulations.
+* Immutable, trivially small.
+* Assumes simulation dimensionality `D` equals `size(positions, 2)`; we do not store `D` in the box.
+
+**Displacement scratch:**
+
+* Internally, `lj_forces` uses a small `Vector{Float64}` (length `D`) as a reusable scratch for `Δ`.
 
 ---
 
 ## Algorithms
 
-### Velocity Verlet Algorithm
+### Minimum-image displacement
 
-Given positions `r`, velocities `v`, accelerations `a`, and timestep `dt`:
+For each component $\Delta_k$ of displacement vector `Δ`:
 
-1. `r ← r + v*dt + 0.5*a*dt^2`
-2. Compute new accelerations `a' = F(r)/m`
-3. `v ← v + 0.5*(a + a')*dt`
+```
+half = box.L / 2
+if Δ[k] >  half: Δ[k] -= box.L
+if Δ[k] ≤ -half: Δ[k] += box.L
+```
+
+This maps to `(-L/2, L/2]`. Use `while` only if you ever expect |Δ|>L (shouldn’t occur for pairwise displacements formed via ri - rj).
+
+### Lennard–Jones forces (naive O(N²))
+
+Inputs: positions `R::(N×D)`, `box::CubicBox`, parameters `(ϵ, σ, rcut, shift)`.
 
 Pseudocode:
 
 ```
-function velocity_verlet!(system, forces, dt)
-    a = forces(system.positions) ./ system.masses
-    system.positions += system.velocities*dt + 0.5*a*dt^2
-    a_new = forces(system.positions) ./ system.masses
-    system.velocities += 0.5*(a + a_new)*dt
+function lj_forces(R, box; ϵ=1, σ=1, rcut=Inf, shift=false, return_potential=false)
+    N, D = size(R)
+    F = zeros(N, D)
+    U = 0.0
+
+    σ2 = σ^2
+    rcut2 = rcut^2
+
+    # Optional energy shift
+    Uc = 0.0
+    if shift && isfinite(rcut)
+        s2c = σ2 / rcut2
+        s6c = s2c^3
+        Uc  = 4*ϵ*(s6c^2 - s6c)  # U(rcut)
+    end
+
+    Δ = zeros(D)  # scratch
+
+    for i in 1:N-1
+        ri = @view R[i, :]
+        for j in i+1:N
+            rj = @view R[j, :]
+            Δ .= ri .- rj
+            minimum_image!(Δ, box)
+            r2 = dot(Δ, Δ)
+            if r2 <= rcut2
+                invr2 = 1 / r2
+                s2 = σ2 * invr2
+                s6 = s2^3
+                # Force magnitude over r: fr_over_r = 24ϵ*(2*s6^2 - s6) * invr2
+                fr_over_r = 24*ϵ*(2*s6^2 - s6) * invr2
+                # Vector force on i: Fi += fr_over_r * Δ
+                for k in 1:D
+                    f = fr_over_r * Δ[k]
+                    F[i,k] += f
+                    F[j,k] -= f
+                end
+                if return_potential
+                    U += 4*ϵ*(s6^2 - s6) - Uc
+                end
+            end
+        end
+    end
+    return return_potential ? (F, U) : F
 end
 ```
+
+Notes:
+
+* All math avoids `sqrt` by working with `r²`; only the **unit direction** enters through multiplication by `Δ` (equivalent to dividing by `r`).
+* Newton’s third law is enforced by symmetric accumulation (`+` for `i`, `-` for `j`).
 
 ---
 
 ## Numerical Pitfalls
 
-* **Stability**: Large `dt` leads to divergence; users must select timestep small enough relative to system frequencies.
-* **Precision**: Use `Float64` for positions/velocities to minimize drift.
-* **Energy conservation**: Velocity Verlet conserves energy long-term, but still drifts if `dt` is too large.
+* **Singularity at r→0**: huge forces; users must avoid overlapping particles or add softening. We guard only via finite arithmetic.
+* **Cutoff discontinuity**: With `shift=false`, potential and force both jump at `rcut`. With `shift=true`, potential is continuous but **force remains discontinuous**. This can introduce small energy drift—acceptable for this minimal feature.
+* **Finite precision**: Use `Float64` for positions/velocities to reduce drift; consistent with current package.
+* **Box length vs positions**: Users must keep positions wrapped or large drifts can produce |Δ|>L/2 that violate minimum-image assumptions for direct `ri - rj`. Here we explicitly minimum-image the displacement, so positions themselves need not be wrapped each step, but keeping them within box helps debug output.
+* **Performance**: O(N²) scales poorly; neighbor lists and cell lists are the natural next step.
 
 ---
 
 ## Acceptance Tests
 
-Add to `test/runtests.jl`:
+Add to `test/runtests.jl` (or a new `test/test_lj.jl` included by `runtests.jl`). Use `atol=1e-10` where needed.
 
 ```julia
 using Test
 using Verlet
 
-@testset "ParticleSystem construction" begin
-    ps = ParticleSystem([0.0 0.0], [1.0 0.0], [1.0])
-    @test size(ps.positions) == (1,2)
-    @test size(ps.velocities) == (1,2)
-    @test ps.masses == [1.0]
+@testset "CubicBox + minimum_image!" begin
+    box = CubicBox(10.0)
+    Δ = [ 6.0, -6.0,  0.1]  # in 3D
+    minimum_image!(Δ, box)
+    @test Δ[1] ==  6.0 - 10.0    # -> -4.0
+    @test Δ[2] == -6.0 + 10.0    # ->  4.0
+    @test isapprox(Δ[3], 0.1; atol=1e-12)
 end
 
-@testset "Velocity Verlet free particle" begin
-    forces(r) = zeros(size(r))
-    ps = ParticleSystem([0.0 0.0], [1.0 0.0], [1.0])
-    velocity_verlet!(ps, forces, 0.1)
-    @test isapprox(ps.positions[1,1], 0.1; atol=1e-12)
-    @test isapprox(ps.velocities[1,1], 1.0; atol=1e-12)
+@testset "LJ two-particle (no PBC, analytic check)" begin
+    # Place two particles distance r along x
+    r  = 1.5
+    σ  = 1.0
+    ϵ  = 2.0
+    R  = [0.0 0.0 0.0;
+          r   0.0 0.0]
+    box = CubicBox(100.0) # effectively no wrapping
+    F, U = lj_forces(R, box; ϵ=ϵ, σ=σ, rcut=Inf, return_potential=true)
+
+    # Analytic force magnitude
+    s    = σ/r
+    s6   = s^6
+    fmag = 24*ϵ*(2*s6^2 - s6)/r  # along +x on particle 1
+    @test isapprox(F[1,1],  fmag; atol=1e-10)
+    @test isapprox(F[2,1], -fmag; atol=1e-10)
+    @test isapprox(F[1,2], 0.0; atol=1e-12)
+    @test isapprox(F[2,3], 0.0; atol=1e-12)
+
+    # Analytic potential
+    Uref = 4*ϵ*(s6^2 - s6)
+    @test isapprox(U, Uref; atol=1e-10)
 end
 
-@testset "Velocity Verlet harmonic oscillator" begin
-    forces(r) = -r
-    ps = ParticleSystem([1.0 0.0], [0.0 0.0], [1.0])
-    velocity_verlet!(ps, forces, 0.1)
-    @test ps.positions[1,1] < 1.0   # should move left
+@testset "LJ minimum-image under PBC" begin
+    # Put particles near opposite faces of a small box; distance should wrap
+    L = 5.0
+    box = CubicBox(L)
+    R = [ -2.4   0.0  0.0;   # ~ -L/2 + 0.1
+           2.4   0.0  0.0]   # ~  L/2 - 0.1
+    F = lj_forces(R, box; ϵ=1.0, σ=1.0, rcut=Inf, return_potential=false)
+    # Displacement should be 0.2 along x after wrapping; force pushes apart
+    @test F[1,1] > 0.0
+    @test F[2,1] < 0.0
+    @test isapprox(F[1,1], -F[2,1]; atol=1e-12)
+end
+
+@testset "LJ cutoff and energy shift" begin
+    box = CubicBox(50.0)
+    R   = [0.0 0.0; 1.2 0.0]  # 2D for variety
+    rcut = 1.25
+    # With shift
+    F1, U1 = lj_forces(R, box; rcut=rcut, shift=true, return_potential=true)
+    # Move just beyond cutoff: forces zero, potential ~0 with shift=true
+    R2  = [0.0 0.0; 1.26 0.0]
+    F2, U2 = lj_forces(R2, box; rcut=rcut, shift=true, return_potential=true)
+    @test isapprox(norm(F2), 0.0; atol=1e-12)
+    @test U2 ≈ 0.0 atol=1e-10
+    @test U1 < 0.0  # attractive well inside cutoff
+end
+
+@testset "Compatibility with velocity_verlet! API" begin
+    # Use lj_forces as the `forces` function with potential return
+    box = CubicBox(20.0)
+    forces(r; return_potential=false) = return_potential ?
+        lj_forces(r, box; return_potential=true) :
+        lj_forces(r, box; return_potential=false)
+
+    ps = ParticleSystem([0.9 0.0 0.0; 0.0 0.0 0.0],
+                        zeros(2,3),
+                        ones(2))
+    E0 = kinetic_energy(ps) + potential_energy(ps, forces)
+    velocity_verlet!(ps, forces, 1e-3)
+    E1 = kinetic_energy(ps) + potential_energy(ps, forces)
+    @test isfinite(E0) && isfinite(E1)
 end
 ```
 
 ---
 
-## Task for Implementer
+## Task for Implementer (small & focused)
 
-**Implement the `ParticleSystem` struct and the `velocity_verlet!` integrator.**
-Place the struct and function definitions in `src/Verlet.jl`.
-Then create `test/runtests.jl` with the acceptance tests above.
+1. **Add types & functions** to `src/Verlet.jl` (or split into `src/forces.jl` and `include` it from `Verlet.jl`):
 
-This will establish the foundation of the MD engine.
+   * `CubicBox{T}`, `minimum_image!`, `lj_forces` exactly per API above.
+   * Keep `lj_forces` free-function (not tied to `ParticleSystem`) so it composes with current `potential_energy` convention.
+2. **Export** `CubicBox, minimum_image!, lj_forces` (optional but recommended).
+3. **Write tests** as specified (you can place them in `test/test_lj.jl` and include from `test/runtests.jl`).
+4. **Docs**: add a short usage snippet to `docs/src/guide/forces.md` demonstrating `forces(r) = lj_forces(r, CubicBox(…))`.
 
-## 
-
+That’s it. Once this lands, we can profile and then design a **Verlet neighbor list** with rebuild heuristics and vectorized kernels as the next incremental feature.

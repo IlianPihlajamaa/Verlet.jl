@@ -30,7 +30,11 @@ You pick units, but they must be **consistent**:
 [`ParticleSystem`](@ref), [`velocity_verlet!`](@ref), [`kinetic_energy`](@ref), [`potential_energy`](@ref)
 """
 module Verlet
+using LinearAlgebra
+
 export ParticleSystem, velocity_verlet!, kinetic_energy, potential_energy
+# New exports for periodic box & Lennard–Jones forces
+export CubicBox, minimum_image!, lj_forces
 
 """
     ParticleSystem
@@ -165,6 +169,97 @@ function potential_energy(system::ParticleSystem, forces::Function)::Float64
     end
    error("Force function does not support `return_potential=true`; cannot compute potential_energy.")
 end
+
+
+"""
+    struct CubicBox{T<:Real}
+
+Simple cubic periodic box with side length `L`.
+"""
+struct CubicBox{T<:Real}
+    L::T
+end
+
+"""
+    minimum_image!(Δ::AbstractVector, box::CubicBox)
+
+Apply the minimum-image convention to displacement vector `Δ` in-place,
+mapping each component to the interval `(-L/2, L/2]`.
+"""
+function minimum_image!(Δ::AbstractVector, box::CubicBox)
+    half = box.L / 2
+    @inbounds for k in eachindex(Δ)
+        if Δ[k] >  half
+            Δ[k] -= box.L
+        elseif Δ[k] <= -half
+            Δ[k] += box.L
+        end
+    end
+    return Δ
+end
+
+"""
+    lj_forces(positions::AbstractMatrix, box::CubicBox;
+              ϵ::Real=1.0, σ::Real=1.0, rcut::Real=Inf,
+              shift::Bool=false, return_potential::Bool=false)
+
+Compute Lennard–Jones pair forces with minimum-image convention in a cubic box.
+Returns an `(N×D)` matrix of forces; if `return_potential=true`, returns `(F, U)`.
+
+Pair potential: `U(r) = 4ϵ[(σ/r)^12 - (σ/r)^6]`
+"""
+function lj_forces(positions::AbstractMatrix, box::CubicBox;
+                   ϵ::Real=1.0, σ::Real=1.0, rcut::Real=Inf,
+                   shift::Bool=false, return_potential::Bool=false)
+    N, D = size(positions)
+    F = zeros(Float64, N, D)
+    U = 0.0
+
+    σ2 = float(σ)^2
+    rcut2 = float(rcut)^2
+
+    # Energy shift to make U(rcut)=0 (no force smoothing)
+    Uc = 0.0
+    if shift && isfinite(rcut)
+        s2c = σ2 / rcut2
+        s6c = s2c^3
+        Uc  = 4*float(ϵ)*(s6c^2 - s6c)
+    end
+
+    Δ = zeros(Float64, D)  # displacement scratch
+
+    @inbounds for i in 1:N-1
+        ri = @view positions[i, :]
+        for j in i+1:N
+            rj = @view positions[j, :]
+            Δ .= ri .- rj
+            minimum_image!(Δ, box)
+            r2 = dot(Δ, Δ)
+            
+            # Guard against division by zero for overlapping particles
+            if r2 == 0.0
+                continue
+            end
+            if r2 <= rcut2
+                invr2 = 1 / r2
+                s2 = σ2 * invr2
+                s6 = s2^3
+                # fr_over_r = 24ϵ*(2*s6^2 - s6) * invr2
+                fr_over_r = 24*float(ϵ)*(2*s6^2 - s6) * invr2
+                for k in 1:D
+                    f = fr_over_r * Δ[k]
+                    F[i,k] += f
+                    F[j,k] -= f
+                end
+                if return_potential
+                    U += 4*float(ϵ)*(s6^2 - s6) - Uc
+                end
+            end
+        end
+    end
+    return return_potential ? (F, U) : F
+end
+
 
 
 end # module Verlet
