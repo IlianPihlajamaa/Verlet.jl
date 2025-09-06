@@ -1,5 +1,5 @@
 module Potentials
-using LinearAlgebra
+using LinearAlgebra, StaticArrays
 using ..Core
 export lj_forces
 

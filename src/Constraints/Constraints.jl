@@ -1,6 +1,6 @@
 module Constraints
 
-using LinearAlgebra
+using LinearAlgebra, StaticArrays
 using ..Core
 include("constraints.jl")
 

@@ -1,5 +1,5 @@
 module Neighbors
-using LinearAlgebra
+using LinearAlgebra, StaticArrays
 
 using ..Core
 include("neighborlist.jl")

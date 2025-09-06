@@ -1,17 +1,20 @@
 using Test
 using Random
-using LinearAlgebra
+using LinearAlgebra, StaticArrays
 using Verlet
 
 @testset "cBAOAB integrator with constraints" begin
 @testset "cBAOAB preserves constraints (zero forces)" begin
     N, D = 3, 3
     r0 = 1.0
-    ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
-    ps.positions[2,1] = r0
+    positions = [@SVector zeros(D) for _ in 1:N]
+    positions[2] = @SVector [r0, 0.0, 0.0]
+    velocities = [@SVector zeros(D) for _ in 1:N]
+    masses = ones(N)
+    ps = ParticleSystem(positions, velocities, masses)
     cons = DistanceConstraints([(1,2)], [r0]; tol=1e-10, maxiter=200)
 
-    forces(R) = zero(R)
+    forces(R) = [@SVector zeros(D) for _ in R]
     dt, γ, T = 0.01, 1.0, 0.5
     rng = MersenneTwister(1234)
 
@@ -20,7 +23,7 @@ using Verlet
         langevin_baoab_constrained!(ps, forces, dt, cons; γ=γ, T=T, rng=rng)
     end
 
-    d = ps.positions[1,:] .- ps.positions[2,:]
+    d = ps.positions[1] - ps.positions[2]
     @test isapprox(norm(d), r0; atol=1e-6)
 
     # Velocity residual should be tiny
@@ -31,9 +34,12 @@ end
 
 @testset "cBAOAB temperature sane and finite" begin
     N, D = 8, 3
-    ps = ParticleSystem(randn(N,D), zeros(N,D), ones(N))
+    positions = [@SVector randn(D) for _ in 1:N]
+    velocities = [@SVector zeros(D) for _ in 1:N]
+    masses = ones(N)
+    ps = ParticleSystem(positions, velocities, masses)
     cons = DistanceConstraints([(1,2)], [1.0])
-    forces(R) = zero(R)
+    forces(R) = [@SVector zeros(D) for _ in R]
     dt, γ, T = 0.005, 2.0, 1.2
     rng = MersenneTwister(7)
 
@@ -51,7 +57,10 @@ end
 end
 
 @testset "constraint_residuals reports zero at exact satisfaction" begin
-    ps = ParticleSystem([0.0 0 0; 1.0 0 0], zeros(2,3), ones(2))
+    positions = [@SVector([0.0, 0.0, 0.0]), @SVector([1.0, 0.0, 0.0])]
+    velocities = [@SVector(zeros(3)) for _ in 1:2]
+    masses = ones(2)
+    ps = ParticleSystem(positions, velocities, masses)
     cons = DistanceConstraints([(1,2)], [1.0])
     (; maxC, rmsC, maxCd, rmsCd) = constraint_residuals(ps, cons)
     @test maxC == 0.0

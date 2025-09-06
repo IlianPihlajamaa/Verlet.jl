@@ -9,14 +9,15 @@ A minimal **velocity Verlet** integrator for tiny MD-style problems.
 ## Quickstart
 
 ```@example quickstart
-using Verlet
+using Verlet, StaticArrays
 
 # Free particle in 2D
-forces(r) = zeros(size(r))
+positions = [@SVector [0.0, 0.0]]
+velocities = [@SVector [1.0, 0.0]]
+masses = [1.0]
+forces(R) = [@SVector zeros(2) for _ in R]
 
-ps = ParticleSystem([0.0 0.0],  # 1×2 positions
-                    [1.0 0.0],  # 1×2 velocities
-                    [1.0])      # masses
+ps = ParticleSystem(positions, velocities, masses)
 
 dt = 0.1
 velocity_verlet!(ps, forces, dt)
@@ -32,16 +33,21 @@ Check out the \[Guide → Constrained Dynamics](@ref constraints-guide) section 
 
 
 ## Harmonic oscillator
+
 ```@example ho
-using Verlet
+using Verlet, StaticArrays, LinearAlgebra
 
 # Hooke's law with k = 1, potential U = 0.5 * |r|^2
-function ho_forces(r; return_potential=false)
-    F = -r
-    return return_potential ? (F, 0.5 * sum(abs2, r)) : F
+function ho_forces(R; return_potential=false)
+    F = [-r for r in R]
+    U = 0.5 * sum(norm(r)^2 for r in R)
+    return return_potential ? (F, U) : F
 end
 
-ps = ParticleSystem([1.0 0.0], [0.0 0.0], [1.0])
+positions = [@SVector [1.0, 0.0]]
+velocities = [@SVector [0.0, 0.0]]
+masses = [1.0]
+ps = ParticleSystem(positions, velocities, masses)
 
 dt = 0.1
 for _ in 1:100
@@ -53,15 +59,20 @@ end
 
 ## Energy monitoring
 
-```@example energy
-using Verlet
 
-function ho_forces(r; return_potential=false)
-    F = -r
-    return return_potential ? (F, 0.5 * sum(abs2, r)) : F
+```@example energy
+using Verlet, StaticArrays, LinearAlgebra
+
+function ho_forces(R; return_potential=false)
+    F = [-r for r in R]
+    U = 0.5 * sum(norm(r)^2 for r in R)
+    return return_potential ? (F, U) : F
 end
 
-ps = ParticleSystem([1.0 0.0], [0.0 1.0], [1.0])
+positions = [@SVector [1.0, 0.0]]
+velocities = [@SVector [0.0, 1.0]]
+masses = [1.0]
+ps = ParticleSystem(positions, velocities, masses)
 dt = 0.05
 
 energies = Float64[]
@@ -95,8 +106,9 @@ using Verlet
 # Create a cubic periodic box
 box = CubicBox(20.0)
 
-# Random positions for 100 particles in 3D
-R = randn(100, 3)
+using StaticArrays
+# Random positions for 100 particles in 3D as SVectors
+R = [@SVector randn(3) for _ in 1:100]
 wrap_positions!(R, box)
 
 # Build neighbor list with cutoff + skin
@@ -114,6 +126,28 @@ F, U = lj_forces(R, box, nlist; rcut=2.5, return_potential=true)
 
 See the full API reference in `api.md`.
 
+## Note on Particle Representation
+
+Verlet.jl now uses `Vector{SVector{Dims, T_Float}}` (from StaticArrays) to represent particle positions, velocities, displacements, and forces. This provides better performance and type stability compared to the previous `Matrix`-based approach. All user code and force functions should now expect and return vectors of SVectors, e.g.:
+
+```julia
+using StaticArrays
+N, D = 100, 3
+positions = [@SVector randn(D) for _ in 1:N]
+velocities = [@SVector zeros(D) for _ in 1:N]
+masses = ones(N)
+ps = ParticleSystem(positions, velocities, masses)
+```
+
+Force functions should accept and return `Vector{SVector}` as well:
+
+```julia
+function my_forces(R)
+    # R is Vector{SVector{D, T}}
+    return [@SVector zeros(length(R[1])) for _ in R]
+end
+```
+
 ## NEW: O(N) Build with Cell-Linked Lists + Half Neighbor Lists
 
 The classic `build_neighborlist` uses an **O(N²)** construction. For larger systems
@@ -121,15 +155,17 @@ you can switch to a **cell-linked grid** builder that is **O(N)** at fixed densi
 and emits a **half list** (each pair stored once with `j > i`):
 
 ```@example
-using Verlet
-box = CubicBox(20.0)
-R = (rand(2_000,3) .- 0.5) .* box.L  # random positions in (-L/2, L/2]
-wrap_positions!(R, box)
+using Verlet, StaticArrays
+D = 3
+box = CubicBox(10.0)
 cutoff, skin = 2.5, 0.4
-grid = build_cellgrid(R, box; cell_size=cutoff+skin)
-nl = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
+R = [SVector{D}((rand(D) .- 0.5) .* box.L) for _ in 1:2_000]  # random positions in (-L/2, L/2]
+wrap_positions!(R, box)
+Rmat = reduce(hcat, R)
+grid = build_cellgrid(Rmat, box; cell_size=cutoff+skin)
+nl = build_neighborlist_cells(Rmat, box; cutoff=cutoff, skin=skin, grid=grid)
 # Force evaluation with half list (branch-free inner loop)
-F = lj_forces(R, box, nl; rcut=cutoff)  # or (F,U) with return_potential=true
+F = lj_forces(Rmat, box, nl; rcut=cutoff)  # or (F,U) with return_potential=true
 size(F)
 ```
 

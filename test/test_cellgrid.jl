@@ -1,5 +1,5 @@
 using Test
-using LinearAlgebra
+using LinearAlgebra, StaticArrays
 using Verlet
 using Random
 

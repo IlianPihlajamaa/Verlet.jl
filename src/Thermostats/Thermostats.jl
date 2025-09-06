@@ -1,5 +1,5 @@
 module Thermostats
-using LinearAlgebra
+using LinearAlgebra, StaticArrays
 
 using ..Core
 include("baoab.jl")

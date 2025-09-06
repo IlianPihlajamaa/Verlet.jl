@@ -22,7 +22,7 @@ end
 
 
 function _displacement!(Δ, ri, rj, cons::DistanceConstraints, box=nothing)
-    Δ .= ri .- rj
+    Δ .= ri - rj
     if cons.use_minimum_image && box !== nothing
         minimum_image!(Δ, box)
     end
@@ -35,14 +35,15 @@ end
 Iteratively correct positions to satisfy constraints.
 """
 function apply_shake!(ps, cons::DistanceConstraints, dt)
-    N, D = size(ps.positions)
-    Δ = zeros(D)
+    N = length(ps.positions)
+    D = length(ps.positions[1])
+    Δ = zeros(eltype(ps.positions[1]), D)
     masses = ps.masses
     for iter in 1:cons.maxiter
         maxviol = 0.0
         for (k, (i, j)) in enumerate(zip(cons.i, cons.j))
-            ri = view(ps.positions, i, :)
-            rj = view(ps.positions, j, :)
+            ri = ps.positions[i]
+            rj = ps.positions[j]
             _displacement!(Δ, ri, rj, cons)
             dist2 = dot(Δ, Δ)
             C = dist2 - cons.r0[k]^2
@@ -53,8 +54,8 @@ function apply_shake!(ps, cons::DistanceConstraints, dt)
                     error("Constraint ill-conditioned: σ≈0 between atoms $i and $j")
                 end
                 Δλ = -C / (2σ)
-                @. ri += (Δλ / masses[i]) * Δ
-                @. rj -= (Δλ / masses[j]) * Δ
+                ps.positions[i] += (Δλ / masses[i]) * Δ
+                ps.positions[j] -= (Δλ / masses[j]) * Δ
             end
         end
         if maxviol <= cons.tol
@@ -70,25 +71,26 @@ end
 Correct velocities to satisfy velocity constraints.
 """
 function apply_rattle!(ps, cons::DistanceConstraints)
-    N, D = size(ps.positions)
-    Δ = zeros(D)
+    N = length(ps.positions)
+    D = length(ps.positions[1])
+    Δ = zeros(eltype(ps.positions[1]), D)
     masses = ps.masses
     for iter in 1:cons.maxiter
         maxviol = 0.0
         for (k, (i, j)) in enumerate(zip(cons.i, cons.j))
-            ri = view(ps.positions, i, :)
-            rj = view(ps.positions, j, :)
+            ri = ps.positions[i]
+            rj = ps.positions[j]
             _displacement!(Δ, ri, rj, cons)
-            vi = view(ps.velocities, i, :)
-            vj = view(ps.velocities, j, :)
-            vrel = vi .- vj
+            vi = ps.velocities[i]
+            vj = ps.velocities[j]
+            vrel = vi - vj
             dotdv = dot(Δ, vrel)
             maxviol = max(maxviol, abs(dotdv))
             if abs(dotdv) > cons.tol
                 τ = (1/masses[i] + 1/masses[j]) * dot(Δ, Δ)
                 μ = -dotdv / τ
-                @. vi += (μ / masses[i]) * Δ
-                @. vj -= (μ / masses[j]) * Δ
+                ps.velocities[i] += (μ / masses[i]) * Δ
+                ps.velocities[j] -= (μ / masses[j]) * Δ
             end
         end
         if maxviol <= cons.tol
@@ -107,15 +109,15 @@ function velocity_verlet_shake_rattle!(ps, forces, dt, cons::DistanceConstraints
     invm = 1.0 ./ ps.masses
     # Half kick
     F = forces(ps.positions)
-    ps.velocities .+= 0.5 .* dt .* F .* invm
+    ps.velocities .= ps.velocities .+ 0.5 .* dt .* F .* invm
     # Drift
-    ps.positions .+= dt .* ps.velocities
+    ps.positions .= ps.positions .+ dt .* ps.velocities
     # SHAKE
     apply_shake!(ps, cons, dt)
     # New forces
     F = forces(ps.positions)
     # Half kick
-    ps.velocities .+= 0.5 .* dt .* F .* invm
+    ps.velocities .= ps.velocities .+ 0.5 .* dt .* F .* invm
     # RATTLE
     apply_rattle!(ps, cons)
     return ps
@@ -130,12 +132,12 @@ function remove_com_motion!(ps; which=:velocity)
     m = ps.masses
     Mtot = sum(m)
     if which == :velocity || which == :both
-        Vcom = (ps.velocities' * m) / Mtot
-        ps.velocities .-= Vcom'
+        Vcom = sum(ps.velocities .* m) / Mtot
+        ps.velocities .= ps.velocities .- Ref(Vcom)
     end
     if which == :position || which == :both
-        Rcom = (ps.positions' * m) / Mtot
-        ps.positions .-= Rcom'
+        Rcom = sum(ps.positions .* m) / Mtot
+        ps.positions .= ps.positions .- Ref(Rcom)
     end
     return ps
 end
@@ -177,16 +179,16 @@ function constraint_residuals(ps, cons::DistanceConstraints)
     accC2  = 0.0
     accCd2 = 0.0
 
-    D = size(R, 2)
-    d = zeros(eltype(R), D)
+    D = length(R[1])
+    d = zeros(eltype(R[1]), D)
 
     for ℓ in 1:L
         i = is[ℓ]
         j = js[ℓ]
-        @views ri = R[i, :]
-        @views rj = R[j, :]
+        ri = R[i]
+        rj = R[j]
         _displacement!(d, ri, rj, cons)
-        @views vij = V[i, :] .- V[j, :]
+        vij = V[i] - V[j]
 
         r0 = lengths[ℓ]
         Cl = dot(d, d) - r0^2

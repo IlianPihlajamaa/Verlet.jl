@@ -13,10 +13,9 @@ classical **SHAKE** (positions) and **RATTLE** (velocities) algorithms.
 
 Use [`DistanceConstraints`](@ref) to define a set of pairwise distance constraints:
 
-```@example constraints
-using Verlet
-using LinearAlgebra
 
+```@example constraints
+using Verlet, StaticArrays
 # A diatomic molecule with target bond length 1.0
 pairs   = [(1,2)]
 lengths = [1.0]
@@ -39,18 +38,21 @@ Arguments:
 
 The [`velocity_verlet_shake_rattle!`](@ref) driver advances the system with constraints enforced:
 
+
 ```@example constraints
+using Verlet, StaticArrays, LinearAlgebra
 N, D = 2, 3
-ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
-ps.positions[2,1] = 1.2   # initial bond slightly off
-
-forces(R) = zero(R)  # no external forces
-
+positions = [@SVector zeros(D) for _ in 1:N]
+positions[2] = @SVector [1.2, 0.0, 0.0]   # initial bond slightly off
+velocities = [@SVector zeros(D) for _ in 1:N]
+masses = ones(N)
+ps = ParticleSystem(positions, velocities, masses)
+cons = DistanceConstraints([(1,2)], [1.0])
+forces(R) = [@SVector zeros(D) for _ in R]  # no external forces
 for step in 1:100
-    velocity_verlet_shake_rattle!(ps, forces, 0.01, cons)
+  velocity_verlet_shake_rattle!(ps, forces, 0.01, cons)
 end
-
-d = ps.positions[1,:] .- ps.positions[2,:]
+d = ps.positions[1] - ps.positions[2]
 @show norm(d)  # ~1.0
 ```
 
@@ -70,9 +72,14 @@ The [`degrees_of_freedom`](@ref) function accounts for:
 - minus one per constraint
 - minus dimensions if COM motion is removed
 
+
 ```@example constraints
+using StaticArrays
 N, D = 3, 3
-ps = ParticleSystem(zeros(N,D), zeros(N,D), ones(N))
+positions = [@SVector zeros(D) for _ in 1:N]
+velocities = [@SVector zeros(D) for _ in 1:N]
+masses = ones(N)
+ps = ParticleSystem(positions, velocities, masses)
 cons = DistanceConstraints([(1,2)], [1.0])
 dof = degrees_of_freedom(ps; constraints=cons, remove_com=true)
 @show dof
@@ -85,13 +92,17 @@ Correct DoF is essential for unbiased temperature and pressure estimators.
 Use [`remove_com_motion!`](@ref) to zero the mass-weighted center-of-mass velocity or position.
 This prevents unphysical drift of the entire system.
 
+
 ```@example constraints
+using StaticArrays
 N, D = 3, 3
-ps = ParticleSystem(zeros(N,D), zeros(N,D), [1.0, 2.0, 3.0])
-ps.velocities .= 1.0
+positions = [@SVector zeros(D) for _ in 1:N]
+velocities = [@SVector ones(D) for _ in 1:N]
+masses = [1.0, 2.0, 3.0]
+ps = ParticleSystem(positions, velocities, masses)
 remove_com_motion!(ps; which=:velocity)
 # After removal, COM velocity should be ~0
-Vcom = sum(ps.masses .* ps.velocities[:,1]) / sum(ps.masses)
+Vcom = sum(ps.masses .* map(v -> v[1], ps.velocities)) / sum(ps.masses)
 @show Vcom
 ```
 
@@ -122,6 +133,11 @@ Vcom = sum(ps.masses .* ps.velocities[:,1]) / sum(ps.masses)
 
 These classical references describe the original SHAKE and RATTLE algorithms
 implemented here.
+
+
+## Note on Particle Representation
+
+All positions, velocities, and forces are now represented as `Vector{SVector{D, T}}` for performance and type stability. Update your code and constraint definitions accordingly.
 
 ## See Also
 

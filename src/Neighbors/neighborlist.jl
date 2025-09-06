@@ -14,12 +14,12 @@ Fields
 
 Use `build_neighborlist` to construct, and `maybe_rebuild!` to keep it updated.
 """
-mutable struct NeighborList{IT,T}
+mutable struct NeighborList{IT,T, Dims}
     cutoff::T
     skin::T
     pairs::Vector{IT}         # concatenated neighbor indices (1-based)
     offsets::Vector{IT}       # length N+1; neighbors of i are pairs[offsets[i]:(offsets[i+1]-1)]
-    ref_positions::Matrix{T}  # N×D copy at last (re)build
+    ref_positions::Vector{SVector{Dims,T}}  # N copy at last (re)build
 end
 
 """
@@ -31,19 +31,17 @@ Pairs are included if they are within `cutoff + skin` under minimum-image distan
 This is an **O(N²)** operation but performed infrequently. The returned `NeighborList`
 uses a CSR (compressed sparse row) layout for compact storage and fast iteration.
 """
-function build_neighborlist(R::AbstractMatrix{T_float}, box::CubicBox{T_float}; cutoff::T_float, skin::T_float=T_float(0.3))
-    N, D = size(R)
-    T = T_float
-    IT = T_int
-    rlist2 = T(cutoff + skin)^2
+function build_neighborlist(R::Vector{SVector{Dims,T}}, box::CubicBox{T}; cutoff::T, skin::T=T(0.3)) where {Dims,T}
+    N = length(R)
+    IT = Int
+    rlist2 = (cutoff + skin)^2
     neighs = [Vector{IT}() for _ in 1:N]
-
-    Δ = zeros(T, D)
+    Δ = zeros(T, Dims)
     @inbounds for i in 1:N-1
-        ri = @view R[i,:]
+        ri = R[i]
         for j in i+1:N
-            rj = @view R[j,:]
-            Δ .= ri .- rj
+            rj = R[j]
+            Δ .= ri - rj
             minimum_image!(Δ, box)
             r2 = dot(Δ, Δ)
             if r2 <= rlist2
@@ -52,7 +50,6 @@ function build_neighborlist(R::AbstractMatrix{T_float}, box::CubicBox{T_float}; 
             end
         end
     end
-
     offsets = Vector{IT}(undef, N+1)
     offsets[1] = IT(1)
     @inbounds for i in 1:N
@@ -66,7 +63,7 @@ function build_neighborlist(R::AbstractMatrix{T_float}, box::CubicBox{T_float}; 
             pairs[start:stop] = neighs[i]
         end
     end
-    NeighborList{Int,Float64}(float(cutoff), float(skin), pairs, offsets, copy(Matrix{Float64}(R)))
+    NeighborList{IT,T, Dims}(cutoff, skin, pairs, offsets, copy(R))
 end
 
 """
@@ -75,19 +72,16 @@ end
 Return the maximum particle displacement (with minimum-image convention) since `nlist` was built.
 Used internally by `maybe_rebuild!`.
 """
-function max_displacement_since_build(nlist::NeighborList, R::AbstractMatrix, box::CubicBox)
-    N, D = size(R)
-    @assert size(nlist.ref_positions) == (N, D)
-    Δ = zeros(Float64, D)
+function max_displacement_since_build(nlist::NeighborList{IT,T, Dims}, R::Vector{SVector{Dims,T}}, box::CubicBox{T}) where {IT,T,Dims}
+    N = length(R)
+    @assert length(nlist.ref_positions) == N
+    Δ = zeros(T, Dims)
     maxdisp = 0.0
     @inbounds for i in 1:N
-        ri = @view R[i,:]
-        r0 = @view nlist.ref_positions[i,:]
-        Δ .= ri .- r0
+        ri = R[i]
+        r0 = nlist.ref_positions[i]
+        Δ .= ri - r0
         minimum_image!(Δ, box)
-        # Use L∞ (max per-axis) displacement to avoid spurious rebuilds from
-        # rare multi-axis fluctuations slightly exceeding half-skin in L2.
-        # This is a conservative policy (never rebuilds earlier than L2).
         d = maximum(abs, Δ)
         if d > maxdisp
             maxdisp = d
@@ -103,15 +97,13 @@ Check whether the neighbor list `nlist` is still valid given new positions `R`.
 If the maximum displacement since the last build is greater than `skin/2`, rebuild the
 list and return `true`. Otherwise leave it unchanged and return `false`.
 """
-function maybe_rebuild!(nlist::NeighborList, R::AbstractMatrix, box::CubicBox)
+function maybe_rebuild!(nlist::NeighborList{IT,T, Dims}, R::Vector{SVector{Dims,T}}, box::CubicBox{T}) where {IT,T,Dims}
     maxdisp = max_displacement_since_build(nlist, R, box)
-        # Classic half-skin rule: rebuild only when strictly beyond half the skin.
-        if maxdisp > nlist.skin / 2
+    if maxdisp > nlist.skin / 2
         newnl = build_neighborlist(R, box; cutoff=nlist.cutoff, skin=nlist.skin)
-    # Replace internal storage with the newly built lists
-    nlist.pairs = newnl.pairs
-    nlist.offsets = newnl.offsets
-    nlist.ref_positions = newnl.ref_positions
+        nlist.pairs = newnl.pairs
+        nlist.offsets = newnl.offsets
+        nlist.ref_positions = newnl.ref_positions
         return true
     else
         return false
@@ -149,11 +141,11 @@ nlist = build_neighborlist(R, box; cutoff=2.5, skin=0.4)
 F, U = lj_forces(R, box, nlist; rcut=2.5, return_potential=true)
 ```
 """
-function lj_forces(R::AbstractMatrix, box::CubicBox, nlist::NeighborList;
+function lj_forces(R::Vector{SVector{Dims,T}}, box::CubicBox{T}, nlist::NeighborList{IT,T, Dims};
                    ϵ::Real=1.0, σ::Real=1.0, rcut::Real=NaN,
-                   shift::Bool=false, return_potential::Bool=false)
-    N, D = size(R)
-    F = zeros(Float64, N, D)
+                   shift::Bool=false, return_potential::Bool=false) where {Dims,T,IT}
+    N = length(R)
+    F = [zero(SVector{Dims,T}) for _ in 1:N]
     U = 0.0
     σ2 = float(σ)^2
     cutoff = isnan(rcut) ? nlist.cutoff : float(rcut)
@@ -167,15 +159,15 @@ function lj_forces(R::AbstractMatrix, box::CubicBox, nlist::NeighborList;
         Uc  = 4*float(ϵ)*(s6c^2 - s6c)
     end
 
-    Δ = zeros(Float64, D)
+    Δ = zeros(T, Dims)
     @inbounds for i in 1:N
-        ri = @view R[i,:]
+        ri = R[i]
         for idx in nlist.offsets[i]:(nlist.offsets[i+1]-1)
             j = nlist.pairs[idx]
             # Apply each symmetric pair once
             if j > i
-                rj = @view R[j,:]
-                Δ .= ri .- rj
+                rj = R[j]
+                Δ .= ri - rj
                 minimum_image!(Δ, box)
                 r2 = dot(Δ, Δ)
                 if r2 == 0.0
@@ -186,11 +178,9 @@ function lj_forces(R::AbstractMatrix, box::CubicBox, nlist::NeighborList;
                     s2 = σ2 * invr2
                     s6 = s2^3
                     fr_over_r = 24*float(ϵ)*(2*s6^2 - s6) * invr2
-                    for k in 1:D
-                        f = fr_over_r * Δ[k]
-                        F[i,k] += f
-                        F[j,k] -= f
-                    end
+                    fvec = fr_over_r .* Δ
+                    F[i] += fvec
+                    F[j] -= fvec
                     if return_potential
                         U += 4*float(ϵ)*(s6^2 - s6) - Uc
                     end

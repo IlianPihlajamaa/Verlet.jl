@@ -7,6 +7,33 @@ struct CubicBox{T_float}
     L::T_float
 end
 
+
+"""
+    wrap_positions!(R::Vector{SVector{D,T}}, box::CubicBox) where {D,T}
+
+Wrap particle positions `R` (as a vector of SVectors) into the primary periodic image of `box` in-place.
+This is useful before building neighbor lists or measuring displacements.
+"""
+function wrap_positions!(R::Vector{SVector{D,T}}, box::CubicBox) where {D,T}
+    half = box.L / 2
+    L = box.L
+    for i in eachindex(R)
+        v = R[i]
+        arr = ntuple(k -> begin
+            x = v[k]
+            while x > half
+                x -= L
+            end
+            while x <= -half
+                x += L
+            end
+            x
+        end, D)
+        R[i] = SVector{D,T}(arr)
+    end
+    return R
+end
+
 """
     minimum_image!(Δ, box::CubicBox)
 

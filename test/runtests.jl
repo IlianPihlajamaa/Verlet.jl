@@ -1,7 +1,7 @@
 using Test
 using Verlet
 
-using LinearAlgebra
+using LinearAlgebra, StaticArrays
 
 # Core unit tests
 include("test_core.jl")

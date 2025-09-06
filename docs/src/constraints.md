@@ -13,8 +13,11 @@ satisfied at a given state:
 * `maxCd`, `rmsCd` — maximum and RMS velocity residuals
 
 ```@example
-using Verlet
-ps = ParticleSystem([0.0 0 0; 1.0 0 0], zeros(2,3), ones(2))
+using Verlet, StaticArrays
+positions = [SVector{3}(0.0, 0.0, 0.0), SVector{3}(1.0, 0.0, 0.0)]
+velocities = [SVector{3}(0.0, 0.0, 0.0) for _ in 1:2]
+masses = ones(2)
+ps = ParticleSystem(positions, velocities, masses)
 cons = DistanceConstraints([(1,2)], [1.0])
 constraint_residuals(ps, cons)
 ```

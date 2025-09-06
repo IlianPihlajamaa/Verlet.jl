@@ -12,27 +12,28 @@ This guide shows how to run **constant-temperature (NVT)** dynamics using the **
  
 ```julia
 # Typical workflow (package API names shown; adapt to your module's name/exports)
-using Random
- 
+using Random, StaticArrays
+
 N, D = 64, 3
-ps = ParticleSystem(zeros(N, D), randn(N, D), ones(N))
-forces(R) = -0.2 .* R  # any user-defined force function
+positions = [@SVector zeros(D) for _ in 1:N]
+velocities = [@SVector randn(D) for _ in 1:N]
+masses = ones(N)
+ps = ParticleSystem(positions, velocities, masses)
+forces(R) = [ -0.2 .* r for r in R ]  # any user-defined force function
 dt = 0.005      # time step
-γ  = 1.0        # friction \[1/time]
+γ  = 1.0        # friction [1/time]
 Tt = 1.5        # target T  (kB=1.0 here, so T is in energy units)
 rng = MersenneTwister(2025)
- 
+
 # Optional: bring KE near the target quickly
 velocity_rescale!(ps, Tt; kB=1.0)
 # Run several steps under NVT
 for _ in 1:2_000
+	langevin_baoab!(ps, forces, dt; γ=γ, T=Tt, kB=1.0, rng=rng)
+end
 
-* langevin_baoab!(ps, forces, dt; γ=γ, T=Tt, kB=1.0, rng=rng)
-	end
-*
-
-\@info "Instantaneous T" instantaneous_temperature(ps; kB=1.0)
-`` +
+@info "Instantaneous T" instantaneous_temperature(ps; kB=1.0)
+```
 ## Choosing `γ` and `dt` +
 - **Units:** ensure `γ` is in `1/time` and `kB*T` in energy, consistent with `r`, `v`, and `m`.
 - Start with `γ*dt ≈ 0.1–1`. Larger values overdamp dynamics (OK for sampling; poor for kinetics).
@@ -69,8 +70,11 @@ Use `Float64` across positions, velocities, and masses to limit drift. Distances
 
 ## Shapes & broadcasting
 
-- Arrays are `(N×D)` with rows as particles.
-- `masses` is length `N`. Broadcasting `forces(r) ./ masses` divides each row by its particle mass.
+- Positions, velocities, and forces are now `Vector{SVector{D, T}}` with one SVector per particle.
+- `masses` is length `N`. To divide forces by mass, use broadcasting: `[F[i] ./ masses[i] for i in 1:length(F)]`.
+## Note on Particle Representation
+
+All positions, velocities, and forces are now represented as `Vector{SVector{D, T}}` for performance and type stability. Update your code and force functions accordingly.
 
 ## Boundary conditions (not included)
 

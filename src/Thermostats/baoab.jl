@@ -16,8 +16,8 @@ It is widely used for robust thermostatting and near-optimal configurational sam
 When `γ == 0`, the O-step is the identity and BAOAB reduces to velocity–Verlet (up to roundoff).
  
 # Arguments
-- `ps::ParticleSystem`: System with `positions::AbstractMatrix(N,D)`, `velocities::AbstractMatrix(N,D)`, and `masses::AbstractVector(N)`.
-- `forces`: A callable `F(R)::AbstractMatrix(N,D)` returning forces evaluated at positions `R`.
+- `ps::ParticleSystem`: System with `positions::Vector{SVector{Dims,T}}`, `velocities::Vector{SVector{Dims,T}}`, and `masses::Vector{T}`.
+- `forces`: A callable `F(R)::Vector{SVector{Dims,T}}` returning forces evaluated at positions `R`.
 - `dt::Real`: Time step (same time units as used for `γ`).
  
 # Keywords
@@ -145,7 +145,8 @@ Effective translational DoF, reduced by number of constraints and optionally COM
 This is the canonical method. A no-keyword fallback is provided for backward compatibility.
 """
 function degrees_of_freedom(ps; constraints=nothing, remove_com::Bool=false)::Int
-    N, D = size(ps.positions)
+    N = length(ps.positions)
+    D = length(ps.positions[1])
     dof = N * D
     if constraints !== nothing
         dof -= length(constraints.r0)
@@ -172,8 +173,8 @@ T = 2 * KE / (kB * dof).
 function instantaneous_temperature(ps; kB::T_float=one(T_float))::T_float where {T_float}
     v = ps.velocities
     m = ps.masses
-    vsq = sum(abs2, v; dims=2)      # N×1
-    KE = T_float(0.5) * sum(m .* vec(vsq))   # scalar
+    vsq = [sum(abs2.(vi)) for vi in v]     # N
+    KE = T_float(0.5) * sum(m .* vsq)   # scalar
     dof = degrees_of_freedom(ps)
     return (T_float(2.0) * KE) / (kB * dof)
 end
@@ -186,7 +187,7 @@ Deterministically rescale velocities to match target temperature T.
 function velocity_rescale!(ps, T::Real; kB::Real=1.0)
     Tinst = instantaneous_temperature(ps; kB=kB)
     λ = sqrt(T / max(Tinst, eps()))
-    ps.velocities .*= λ
+    ps.velocities .= map(v -> v * λ, ps.velocities)
     return ps
 end
 
@@ -225,6 +226,8 @@ function langevin_baoab!(ps, forces, dt; γ, T, kB::Real=1.0, rng::AbstractRNG=R
     R = ps.positions
     V = ps.velocities
     m = ps.masses
+    N = length(R)
+    D = length(R[1])
 
     # Precompute and cache
     invm = 1.0 ./ m                            # length N
@@ -235,29 +238,41 @@ function langevin_baoab!(ps, forces, dt; γ, T, kB::Real=1.0, rng::AbstractRNG=R
     F = forces(R)
 
     # B: half kick   v += (dt/2) * F/m
-    @. V += 0.5 * dt * F * invm
+    for i in 1:N
+        V[i] += (0.5 * dt) * F[i] * invm[i]
+    end
 
     # A: half drift  r += (dt/2) * v
-    @. R += 0.5 * dt * V
+    for i in 1:N
+        R[i] += (0.5 * dt) * V[i]
+    end
 
     # O: Ornstein–Uhlenbeck (exact)
     if s2_common == 0.0
         # no noise term; pure damping (c==1 ⇒ identity)
-        @. V = c * V
+        for i in 1:N
+            V[i] = c * V[i]
+        end
     else
-        ξ = randn(rng, size(V))                # N×D iid N(0,1)
-        s = sqrt.(s2_common ./ m)              # length N
-        @. V = c * V + ξ * s                   # broadcast s across columns
+        for i in 1:N
+            ξ = randn(rng, SVector{D,Float64}) # N(0,1) for each component
+            s = sqrt(s2_common / m[i])
+            V[i] = c * V[i] + ξ * s
+        end
     end
 
     # A: half drift
-    @. R += 0.5 * dt * V
+    for i in 1:N
+        R[i] += (0.5 * dt) * V[i]
+    end
 
     # Recompute forces at new positions
     F = forces(R)
 
     # B: half kick
-    @. V += 0.5 * dt * F * invm
+    for i in 1:N
+        V[i] += (0.5 * dt) * F[i] * invm[i]
+    end
 
     return ps
 end
@@ -290,6 +305,8 @@ function langevin_baoab_constrained!(ps::ParticleSystem, forces, dt, cons::Dista
     R = ps.positions
     V = ps.velocities
     m = ps.masses
+    N = length(R)
+    D = length(R[1])
     # Per-particle inverse masses (broadcast across velocity components)
     invm = 1.0 ./ m
 
@@ -297,29 +314,39 @@ function langevin_baoab_constrained!(ps::ParticleSystem, forces, dt, cons::Dista
     F = forces(R)
 
     # --- B: half kick
-    V .+= (dt/2) .* (F .* invm)
+    for i in 1:N
+        V[i] += (dt/2) * F[i] * invm[i]
+    end
     apply_rattle!(ps, cons)  # enforce Ċ = 0
 
     # --- A: half drift
-    R .+= (dt/2) .* V
+    for i in 1:N
+        R[i] += (dt/2) * V[i]
+    end
     apply_shake!(ps, cons, dt/2)  # enforce C = 0
 
     # --- O: OU stochastic velocity step
     c = exp(-γ*dt)
-    ξ = randn(rng, size(V))
-    σ = sqrt.((1 - c^2) .* (kB .* T) .* invm)  # per-particle row scale
-    V .= c .* V .+ ξ .* σ
+    for i in 1:N
+        ξ = SVector{D,Float64}(randn(rng, D)...)  # N(0,1) for each component
+        σ = sqrt((1 - c^2) * (kB * T) * invm[i])
+        V[i] = c * V[i] + ξ * σ
+    end
     apply_rattle!(ps, cons)
 
     # --- A: half drift
-    R .+= (dt/2) .* V
+    for i in 1:N
+        R[i] += (dt/2) * V[i]
+    end
     apply_shake!(ps, cons, dt/2)
 
     # Recompute forces at new positions
     F = forces(R)
 
     # --- B: half kick
-    V .+= (dt/2) .* (F .* invm)
+    for i in 1:N
+        V[i] += (dt/2) * F[i] * invm[i]
+    end
     apply_rattle!(ps, cons)
 
     return ps

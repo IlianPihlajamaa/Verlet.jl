@@ -1,23 +1,24 @@
+
 # Implementation for particle state, e.g. ParticleSystem, CubicBox
+using StaticArrays, LinearAlgebra
+
 
 
 """
-    ParticleSystem{T}
+    ParticleSystem{Dims,T_float}
 
 A lightweight container for particle states.
 
 # Fields
-- `positions::Matrix{T}`: `(N × D)` array of positions (rows = particles).
-- `velocities::Matrix{T}`: `(N × D)` array of velocities.
-- `masses::Vector{T}`: length-`N` vector of particle masses.
+- `positions::Vector{SVector{Dims,T_float}}`: length-N vector of positions (each an SVector)
+- `velocities::Vector{SVector{Dims,T_float}}`: length-N vector of velocities
+- `masses::Vector{T_float}`: length-N vector of particle masses
 
-!!! tip "Memory layout"
-    For best performance, keep `positions` and `velocities` as `Matrix{T}` with fixed `D` (1–3 typical).
 """
-mutable struct ParticleSystem{T_float}
-    positions::Matrix{T_float}   # (N × D)
-    velocities::Matrix{T_float}  # (N × D)
-    masses::Vector{T_float}      # (N)
+mutable struct ParticleSystem{Dims,T_float}
+    positions::Vector{SVector{Dims,T_float}}   # (N)
+    velocities::Vector{SVector{Dims,T_float}}  # (N)
+    masses::Vector{T_float}                    # (N)
 end
 
 """
@@ -25,9 +26,13 @@ end
 
 Total kinetic energy: `∑ ½ mᵢ ‖vᵢ‖²`.
 """
-function kinetic_energy(system::ParticleSystem{T_float}) where {T_float}
-    @assert size(system.positions) == size(system.velocities) "positions/velocities must be same size"
-    @assert length(system.masses) == size(system.positions, 1) "length(masses) must equal number of particles"
-    v2 = sum(abs2, system.velocities; dims=2)
-    return T_float(0.5) * sum(system.masses .* vec(v2))
+function kinetic_energy(system::ParticleSystem{Dims,T_float}) where {Dims,T_float}
+    @assert length(system.positions) == length(system.velocities) "positions/velocities must be same size"
+    @assert length(system.masses) == length(system.positions) "length(masses) must equal number of particles"
+    Ekin = zero(T_float)
+
+    for i in 1:length(system.positions)
+        Ekin += T_float(0.5) * system.masses[i] * dot(system.velocities[i], system.velocities[i])
+    end
+    return Ekin
 end

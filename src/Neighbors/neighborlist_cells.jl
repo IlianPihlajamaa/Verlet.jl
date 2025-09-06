@@ -6,7 +6,7 @@
 #
 export build_neighborlist_cells
 
-using LinearAlgebra
+using LinearAlgebra, StaticArrays
 # only pull types/builders; do not import parent API functions
 
 # A tiny internal NL type that quacks like the existing `NeighborList` for the fields

@@ -1,5 +1,5 @@
 module Verlet
-using LinearAlgebra
+using LinearAlgebra, StaticArrays, StaticArrays
 
 # Import submodules
 include("Core/Core.jl")
