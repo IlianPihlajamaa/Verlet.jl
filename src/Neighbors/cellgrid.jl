@@ -22,7 +22,7 @@ rebinning at fixed density and powers the O(N) neighbor build.
 !!! warning "Units"
     `R` and `L` must be expressed in the **same length units**.
 """
-struct CellGrid{IT<:Integer,T<:Real}
+struct CellGrid{IT,T}
     L::T                  # cubic box length
     cell_size::T          # typical choice: cutoff + skin (rlist)
     dims::NTuple{3,IT}    # (nx, ny, nz), each ≥ 1

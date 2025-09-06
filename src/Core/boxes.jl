@@ -3,8 +3,8 @@
 
 Simple cubic periodic box with side length `L`.
 """
-struct CubicBox{T<:Real}
-    L::T
+struct CubicBox{T_float}
+    L::T_float
 end
 
 """

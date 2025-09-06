@@ -1,4 +1,5 @@
 
+
 """
     NeighborList{IT<:Integer,T<:Real}
 
@@ -13,7 +14,7 @@ Fields
 
 Use `build_neighborlist` to construct, and `maybe_rebuild!` to keep it updated.
 """
-mutable struct NeighborList{IT<:Integer,T<:Real}
+mutable struct NeighborList{IT,T}
     cutoff::T
     skin::T
     pairs::Vector{IT}         # concatenated neighbor indices (1-based)
@@ -30,11 +31,12 @@ Pairs are included if they are within `cutoff + skin` under minimum-image distan
 This is an **O(N²)** operation but performed infrequently. The returned `NeighborList`
 uses a CSR (compressed sparse row) layout for compact storage and fast iteration.
 """
-function build_neighborlist(R::AbstractMatrix, box::CubicBox; cutoff::Real, skin::Real=0.3)
+function build_neighborlist(R::AbstractMatrix{T_float}, box::CubicBox{T_float}; cutoff::T_float, skin::T_float=T_float(0.3))
     N, D = size(R)
-    T = Float64
-    rlist2 = float(cutoff + skin)^2
-    neighs = [Vector{Int}() for _ in 1:N]
+    T = T_float
+    IT = T_int
+    rlist2 = T(cutoff + skin)^2
+    neighs = [Vector{IT}() for _ in 1:N]
 
     Δ = zeros(T, D)
     @inbounds for i in 1:N-1
@@ -45,18 +47,18 @@ function build_neighborlist(R::AbstractMatrix, box::CubicBox; cutoff::Real, skin
             minimum_image!(Δ, box)
             r2 = dot(Δ, Δ)
             if r2 <= rlist2
-                push!(neighs[i], j)
-                push!(neighs[j], i)
+                push!(neighs[i], IT(j))
+                push!(neighs[j], IT(i))
             end
         end
     end
 
-    offsets = Vector{Int}(undef, N+1)
-    offsets[1] = 1
+    offsets = Vector{IT}(undef, N+1)
+    offsets[1] = IT(1)
     @inbounds for i in 1:N
-        offsets[i+1] = offsets[i] + length(neighs[i])
+        offsets[i+1] = offsets[i] + IT(length(neighs[i]))
     end
-    pairs = Vector{Int}(undef, offsets[end]-1)
+    pairs = Vector{IT}(undef, Int(offsets[end])-1)
     @inbounds for i in 1:N
         start = offsets[i]
         stop  = offsets[i+1]-1

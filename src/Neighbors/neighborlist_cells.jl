@@ -12,16 +12,16 @@ using LinearAlgebra
 # A tiny internal NL type that quacks like the existing `NeighborList` for the fields
 # the tests need (.offsets and .pairs). We also carry ref_positions / cutoff / skin
 # so we can implement `maybe_rebuild!` & `max_displacement_since_build` for it.
-struct HalfNeighborList
-    offsets::Vector{Int}          # CSR row offsets (length N+1)
-    pairs::Vector{Int}            # neighbor j-indices (length = number of pairs)
-    ref_positions::Matrix{Float64}
-    cutoff::Float64
-    skin::Float64
+struct HalfNeighborList{T_int,T_float}
+    offsets::Vector{T_int}          # CSR row offsets (length N+1)
+    pairs::Vector{T_int}            # neighbor j-indices (length = number of pairs)
+    ref_positions::Matrix{T_float}
+    cutoff::T_float
+    skin::T_float
 end
 
 
-@inline function _min_image!(Δ::NTuple{3,Float64}, L::Float64)
+@inline function _min_image!(Δ::NTuple{3,T_float}, L::T_float) where {T_float}
     dx, dy, dz = Δ
     dx -= L * round(dx / L)
     dy -= L * round(dy / L)
@@ -29,10 +29,10 @@ end
     return (dx, dy, dz)
 end
 
-@inline function _squared_distance_min_image(R::AbstractMatrix, i::Int, j::Int, L::Float64)
-    dx = Float64(R[i, 1]) - Float64(R[j, 1])
-    dy = Float64(R[i, 2]) - Float64(R[j, 2])
-    dz = Float64(R[i, 3]) - Float64(R[j, 3])
+@inline function _squared_distance_min_image(R::AbstractMatrix{T_float}, i::T_int, j::T_int, L::T_float) where {T_int,T_float}
+    dx = T_float(R[i, 1]) - T_float(R[j, 1])
+    dy = T_float(R[i, 2]) - T_float(R[j, 2])
+    dz = T_float(R[i, 3]) - T_float(R[j, 3])
     dx, dy, dz = _min_image!((dx, dy, dz), L)
     return dx * dx + dy * dy + dz * dz
 end

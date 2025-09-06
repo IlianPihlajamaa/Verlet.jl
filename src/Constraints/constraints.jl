@@ -1,22 +1,23 @@
+
 """
-    struct DistanceConstraints
+    struct DistanceConstraints{T_int,T_float}
 
 Immutable set of pairwise distance constraints for SHAKE/RATTLE.
 """
-struct DistanceConstraints
-    i::Vector{Int}
-    j::Vector{Int}
-    r0::Vector{Float64}
-    tol::Float64
-    maxiter::Int
+struct DistanceConstraints{T_int,T_float}
+    i::Vector{T_int}
+    j::Vector{T_int}
+    r0::Vector{T_float}
+    tol::T_float
+    maxiter::T_int
     use_minimum_image::Bool
 end
 
 function DistanceConstraints(pairs::Vector{<:Tuple}, lengths::Vector{<:Real}; tol=1e-8, maxiter=50, use_minimum_image=true)
-    i = Int[i for (i, _) in pairs]
-    j = Int[j for (_, j) in pairs]
-    r0 = Float64[length for length in lengths]
-    return DistanceConstraints(i, j, r0, tol, maxiter, use_minimum_image)
+    i = T_int[i for (i, _) in pairs]
+    j = T_int[j for (_, j) in pairs]
+    r0 = T_float[length for length in lengths]
+    return DistanceConstraints{T_int,T_float}(i, j, r0, T_float(tol), T_int(maxiter), use_minimum_image)
 end
 
 

@@ -1,4 +1,11 @@
 module Core
+export T_float, T_int
+
+# Default type selectors
+default_float() = Float64
+default_int() = Int
+const T_float = default_float()
+const T_int = default_int()
 
 export ParticleSystem, velocity_verlet!, kinetic_energy, potential_energy
 export CubicBox, minimum_image!, wrap_positions!, box_length

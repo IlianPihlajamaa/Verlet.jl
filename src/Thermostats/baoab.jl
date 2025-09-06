@@ -169,14 +169,13 @@ Backward-compatible method: returns `N*D` (no constraints, no COM removal).
 Compute instantaneous temperature via equipartition:
 T = 2 * KE / (kB * dof).
 """
-function instantaneous_temperature(ps; kB::Real=1.0)::Float64
+function instantaneous_temperature(ps; kB::T_float=one(T_float))::T_float where {T_float}
     v = ps.velocities
     m = ps.masses
-    # speed^2 per particle (sum over columns)
     vsq = sum(abs2, v; dims=2)      # N×1
-    KE = 0.5 * sum(m .* vec(vsq))   # scalar
+    KE = T_float(0.5) * sum(m .* vec(vsq))   # scalar
     dof = degrees_of_freedom(ps)
-    return (2.0 * KE) / (kB * dof)
+    return (T_float(2.0) * KE) / (kB * dof)
 end
 
 """
