@@ -1,5 +1,3 @@
-
- 
 """
 
 * langevin_baoab!(ps::ParticleSystem, forces, dt; γ, T, kB=1.0, rng=Random.default_rng())
@@ -138,6 +136,7 @@ velocity_rescale!
  # * `forces` is a callable returning an N×D array of forces given positions.
 
 using Random
+using ..Constraints: DistanceConstraints, apply_rattle!, apply_shake!
 
 """
     degrees_of_freedom(ps; constraints=nothing, remove_com=false) -> Int
@@ -287,7 +286,7 @@ Notes:
 - With constraints, prefer this method over the unconstrained `langevin_baoab!`.
 """
 function langevin_baoab_constrained!(ps::ParticleSystem, forces, dt, cons::DistanceConstraints;
-                                     γ, T, kB::Real=1.0, rng=Random.default_rng())
+                                     γ, T, kB::Real=1.0, rng::AbstractRNG=Random.default_rng())
     @assert dt > 0
     R = ps.positions
     V = ps.velocities
@@ -326,4 +325,3 @@ function langevin_baoab_constrained!(ps::ParticleSystem, forces, dt, cons::Dista
 
     return ps
 end
-

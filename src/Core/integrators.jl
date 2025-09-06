@@ -1,3 +1,5 @@
+# Implementation for integrators, e.g. velocity_verlet!
+
 """
     velocity_verlet!(system::ParticleSystem, forces::Function, dt::Float64)
 

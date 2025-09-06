@@ -1,28 +1,4 @@
-# Cell-linked grid data structure and O(N) binning
-#
-# Public API:
-#   struct CellGrid{IT<:Integer, T<:Real}
-#   build_cellgrid(R, box; cell_size)
-#   rebin!(grid, R, box)
-#
-module __CellGridInternal__
-export CellGrid, build_cellgrid, rebin!
 
-using LinearAlgebra
-
-"""
-    CellGrid{IT<:Integer, T<:Real}
-
-Linked-list cell grid for cubic periodic boxes. Uses a push-front linked list
-per cell to avoid allocations during binning.
-"""
-struct CellGrid{IT<:Integer,T<:Real}
-    L::T                  # cubic box length
-    cell_size::T          # typical choice: cutoff + skin (rlist)
-    dims::NTuple{3,IT}    # (nx, ny, nz), each ≥ 1
-    heads::Vector{IT}     # length = nx*ny*nz; 0 sentinel = empty
-    next::Vector{IT}      # length = N; next particle index in the cell list (0 = end)
-end
 """
     CellGrid{IT<:Integer, T<:Real}
 
@@ -46,14 +22,15 @@ rebinning at fixed density and powers the O(N) neighbor build.
 !!! warning "Units"
     `R` and `L` must be expressed in the **same length units**.
 """
-@inline function _box_length(box)
-    # Expect a field `L` (CubicBox(L)), fall back to `getproperty`.
-    try
-        return getfield(box, :L)
-    catch
-        return getproperty(box, :L)
-    end
+struct CellGrid{IT<:Integer,T<:Real}
+    L::T                  # cubic box length
+    cell_size::T          # typical choice: cutoff + skin (rlist)
+    dims::NTuple{3,IT}    # (nx, ny, nz), each ≥ 1
+    heads::Vector{IT}     # length = nx*ny*nz; 0 sentinel = empty
+    next::Vector{IT}      # length = N; next particle index in the cell list (0 = end)
 end
+
+
 
 @inline _n_cells(L::Real, cell_size::Real) = max(1, Int(floor(L / cell_size)))
 
@@ -82,7 +59,7 @@ Returns a populated grid with linked lists set for particle indices 1..N.
 function build_cellgrid(R::AbstractMatrix, box; cell_size::Real)
     @assert size(R,2) ≥ 3 "R must be N×3 (at least 3 columns)."
     N = size(R,1)
-    L = float(_box_length(box))
+    L = float(box_length(box))
     # Choose number of cells so that the EFFECTIVE uniform width cs_eff = L/n ≥ requested cell_size.
     # This guarantees the standard 27-neighbor sweep is sufficient for a search radius ≤ cell_size.
     nx = _n_cells(L, float(cell_size))              # floor(L / requested)
@@ -126,9 +103,3 @@ function rebin!(grid::CellGrid{IT,T}, R::AbstractMatrix, box) where {IT<:Integer
     end
     return grid
 end
-
-end # module __CellGridInternal__
-
-# Re-export public names into Verlet
-using .__CellGridInternal__: CellGrid, build_cellgrid, rebin!
-export CellGrid, build_cellgrid, rebin!

@@ -1,24 +1,28 @@
 module Verlet
 using LinearAlgebra
 
-# Public API exports (implementations live in separate files)
+# Import submodules
+include("Core/Core.jl")
+include("Potentials/Potentials.jl")
+include("Neighbors/Neighbors.jl")
+include("Constraints/Constraints.jl")
+include("Thermostats/Thermostats.jl")
+
+using .Core
+using .Neighbors
+using .Potentials
+using .Constraints
+using .Thermostats
+
+# Re-export public API for backward compatibility
 export ParticleSystem, velocity_verlet!, kinetic_energy, potential_energy
-export langevin_baoab_constrained!, constraint_residuals
-export CubicBox, minimum_image!, wrap_positions!, lj_forces
-export NeighborList, build_neighborlist, maybe_rebuild!, max_displacement_since_build
-export CellGrid, build_cellgrid, rebin!, build_neighborlist_cells
-export langevin_baoab!, instantaneous_temperature, degrees_of_freedom, velocity_rescale!
-export DistanceConstraints, velocity_verlet_shake_rattle!, apply_shake!, apply_rattle!, remove_com_motion!
+export CubicBox, minimum_image!, wrap_positions!, box_length
+export lj_forces
+export NeighborList, build_neighborlist
+export DistanceConstraints, apply_shake!
+export langevin_baoab!, degrees_of_freedom, instantaneous_temperature, velocity_rescale!
 
-# Implementation files
-include("particles.jl")
-include("integrators.jl")
-include("boxes.jl")
-include("forces.jl")
-include("cellgrid.jl")
-include("neighborlist_cells.jl")
-include("neighborlist.jl")
-include("constraints.jl")
-include("thermostats.jl")
-
+export maybe_rebuild!, build_cellgrid, build_neighborlist_cells, rebin!
+export DistanceConstraints, apply_rattle!, apply_shake!, velocity_verlet_shake_rattle!, constraint_residuals, remove_com_motion!
+export langevin_baoab_constrained!
 end # module Verlet

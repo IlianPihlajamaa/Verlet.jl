@@ -1,3 +1,5 @@
+# Implementation for particle state, e.g. ParticleSystem, CubicBox
+
 """
     ParticleSystem
 
