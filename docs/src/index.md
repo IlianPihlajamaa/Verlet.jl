@@ -130,8 +130,8 @@ See the full API reference in `api.md`.
 
 Verlet.jl now uses `Vector{SVector{Dims, T_Float}}` (from StaticArrays) to represent particle positions, velocities, displacements, and forces. This provides better performance and type stability compared to the previous `Matrix`-based approach. All user code and force functions should now expect and return vectors of SVectors, e.g.:
 
-```julia
-using StaticArrays
+```@example 1
+using Verlet, StaticArrays
 N, D = 100, 3
 positions = [@SVector randn(D) for _ in 1:N]
 velocities = [@SVector zeros(D) for _ in 1:N]
@@ -154,18 +154,16 @@ The classic `build_neighborlist` uses an **O(N²)** construction. For larger sys
 you can switch to a **cell-linked grid** builder that is **O(N)** at fixed density
 and emits a **half list** (each pair stored once with `j > i`):
 
-```@example
-using Verlet, StaticArrays
+```@example 1
 D = 3
 box = CubicBox(10.0)
 cutoff, skin = 2.5, 0.4
 R = [SVector{D}((rand(D) .- 0.5) .* box.L) for _ in 1:2_000]  # random positions in (-L/2, L/2]
 wrap_positions!(R, box)
-Rmat = reduce(hcat, R)
-grid = build_cellgrid(Rmat, box; cell_size=cutoff+skin)
-nl = build_neighborlist_cells(Rmat, box; cutoff=cutoff, skin=skin, grid=grid)
+grid = build_cellgrid(R, box; cell_size=cutoff+skin)
+nl = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
 # Force evaluation with half list (branch-free inner loop)
-F = lj_forces(Rmat, box, nl; rcut=cutoff)  # or (F,U) with return_potential=true
+F = lj_forces(R, box, nl; rcut=cutoff)  # or (F,U) with return_potential=true
 size(F)
 ```
 
@@ -181,10 +179,9 @@ Use the same **half-skin rule** via `maybe_rebuild!`. With O(N) builds you
 can afford a **smaller skin** (e.g., 0.2–0.3) to reduce neighbor count and tighten
 force errors:
 
-```@example
-using Verlet
+```@example 1
 box = CubicBox(15.0)
-R = randn(500,3); wrap_positions!(R, box)
+R = randn(SVector{3, Float64}, 500); wrap_positions!(R, box)
 cutoff, skin = 2.5, 0.3
 grid = build_cellgrid(R, box; cell_size=cutoff+skin)
 nl = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
