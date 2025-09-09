@@ -60,7 +60,7 @@ Random.seed!(OPTS["seed"])
 # ----------------------------
 # Helpers
 # ----------------------------
-make_positions(N::Int, D::Int, L::Float64) = (rand(N, D) .* L) .- (L/2)
+make_positions(N::Int, D::Int, L::Float64) = L*rand(SVector{D, Float64}, N) .- (L/2*ones(SVector{D, Float64}),)#(rand(N, D) .* L) .- (L/2)
 
 ns(t) = minimum(t).time
 
@@ -194,56 +194,63 @@ println("• 'force(NL)' always uses shift=false here to match the brute-force s
 
 # === N=128 (CSR naive) ===
 # avg_deg         build         force(NL)     force(O(N^2))   speedup (bf/nl)
-# 94.62           1.098 ms      299.387 μs    398.961 μs      1.33×
+# 94.41           277.672 μs    133.348 μs    151.716 μs      1.14×
 
 # === N=128 (Cell-linked half-list) ===
 # avg_deg(sym)    build(cells+nl)   grid          nl_from_grid    force(NL)     force(O(N^2))   speedup (bf/nl)
-# 94.62           236.830 μs        3.875 μs      221.405 μs      121.154 μs    398.961 μs      3.29×
+# 94.41           229.129 μs        3.846 μs      196.336 μs      101.338 μs    151.716 μs      1.50×
 
 # === N=256 (CSR naive) ===
 # avg_deg         build         force(NL)     force(O(N^2))   speedup (bf/nl)
-# 101.30          3.050 ms      609.003 μs    1.515 ms        2.49×
+# 102.13          906.933 μs    312.255 μs    428.704 μs      1.37×
 
 # === N=256 (Cell-linked half-list) ===
 # avg_deg(sym)    build(cells+nl)   grid          nl_from_grid    force(NL)     force(O(N^2))   speedup (bf/nl)
-# 241.52          2.447 ms          7.983 μs      2.511 ms        626.953 μs    1.515 ms        2.42×
+# 250.19          2.473 ms          8.168 μs      2.554 ms        585.454 μs    428.704 μs      0.73×
 
 # === N=512 (CSR naive) ===
 # avg_deg         build         force(NL)     force(O(N^2))   speedup (bf/nl)
-# 102.77          8.699 ms      1.212 ms      5.568 ms        4.59×
+# 101.72          2.158 ms      634.597 μs    1.182 ms        1.86×
 
 # === N=512 (Cell-linked half-list) ===
 # avg_deg(sym)    build(cells+nl)   grid          nl_from_grid    force(NL)     force(O(N^2))   speedup (bf/nl)
-# 206.79          7.532 ms          15.869 μs     7.641 ms        1.161 ms      5.568 ms        4.80×
+# 209.95          7.227 ms          15.832 μs     7.404 ms        1.012 ms      1.182 ms        1.17×
 
 # === N=1024 (CSR naive) ===
 # avg_deg         build         force(NL)     force(O(N^2))   speedup (bf/nl)
-# 102.27          28.956 ms     2.287 ms      21.251 ms       9.29×
+# 101.57          5.624 ms      1.286 ms      3.730 ms        2.90×
 
 # === N=1024 (Cell-linked half-list) ===
 # avg_deg(sym)    build(cells+nl)   grid          nl_from_grid    force(NL)     force(O(N^2))   speedup (bf/nl)
-# 102.27          8.866 ms          30.799 μs     8.958 ms        1.271 ms      21.251 ms       16.73×
+# 101.57          8.361 ms          31.087 μs     8.397 ms        1.107 ms      3.730 ms        3.37×
 
 # === N=2048 (CSR naive) ===
 # avg_deg         build         force(NL)     force(O(N^2))   speedup (bf/nl)
-# 101.92          103.745 ms    4.563 ms      85.157 ms       18.66×
+# 102.11          17.353 ms     2.641 ms      13.014 ms       4.93×
 
 # === N=2048 (Cell-linked half-list) ===
 # avg_deg(sym)    build(cells+nl)   grid          nl_from_grid    force(NL)     force(O(N^2))   speedup (bf/nl)
-# 101.92          17.241 ms         61.166 μs     17.444 ms       2.590 ms      85.157 ms       32.88×
+# 102.11          16.018 ms         61.828 μs     16.060 ms       2.241 ms      13.014 ms       5.81×
 
 # === N=4096 (CSR naive) ===
 # avg_deg         build         force(NL)     force(O(N^2))   speedup (bf/nl)
-# 102.35          373.021 ms    9.059 ms      339.137 ms      37.44×
+# 102.20          55.514 ms     5.353 ms      48.272 ms       9.02×
 
 # === N=4096 (Cell-linked half-list) ===
 # avg_deg(sym)    build(cells+nl)   grid          nl_from_grid    force(NL)     force(O(N^2))   speedup (bf/nl)
-# 102.35          36.573 ms         122.675 μs    37.585 ms       5.318 ms      339.137 ms      63.77×
+# 102.20          34.247 ms         122.470 μs    34.544 ms       4.573 ms      48.272 ms       10.55×
 
 # === N=8192 (CSR naive) ===
 # avg_deg         build         force(NL)     force(O(N^2))   speedup (bf/nl)
-# 102.07          1.416 s       17.979 ms     1.348 s         74.96×
+# 102.16          198.254 ms    10.937 ms     185.556 ms      16.97×
 
 # === N=8192 (Cell-linked half-list) ===
 # avg_deg(sym)    build(cells+nl)   grid          nl_from_grid    force(NL)     force(O(N^2))   speedup (bf/nl)
-# 102.07          86.460 ms         245.081 μs    87.178 ms       10.648 ms     1.348 s         126.56×
+# 102.16          79.888 ms         250.462 μs    81.362 ms       9.226 ms      185.556 ms      20.11×
+
+# Notes:
+# • CSR 'avg_deg' is the true symmetric average degree at (rcut+skin).
+# • Cell 'avg_deg(sym)' is 2×(half-list pairs)/N to make it comparable to CSR.
+# • 'build(cells+nl)' runs build_neighborlist_cells without supplying a grid (includes grid build).
+# • 'grid' and 'nl_from_grid' show the components when reusing a prebuilt CellGrid.
+# • 'force(NL)' always uses shift=false here to match the brute-force settings.

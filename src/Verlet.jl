@@ -16,7 +16,7 @@ using .Thermostats
 
 # Re-export public API for backward compatibility
 export ParticleSystem, velocity_verlet!, kinetic_energy, potential_energy
-export CubicBox, minimum_image!, wrap_positions!, box_length
+export CubicBox, minimum_image, wrap_positions!, box_length
 export lj_forces
 export NeighborList, build_neighborlist
 export DistanceConstraints, apply_shake!

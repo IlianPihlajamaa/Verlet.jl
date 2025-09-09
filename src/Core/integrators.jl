@@ -9,9 +9,11 @@ function velocity_verlet!(system::ParticleSystem{Dims,T_float}, forces::Function
     @assert length(system.positions) == length(system.velocities) "positions/velocities must be same size"
     @assert length(system.masses) == length(system.positions) "length(masses) must equal number of particles"
     dt2 = dt * dt
-    a = forces(system.positions) ./ system.masses
+    a = forces(system.positions) 
+    a ./= system.masses
     system.positions .= system.positions .+ system.velocities .* dt .+ a .* (0.5 * dt2)
-    a_new = forces(system.positions) ./ system.masses
+    a_new = forces(system.positions)
+    a./= system.masses
     system.velocities .= system.velocities .+ 0.5 .* (a .+ a_new) .* dt
     return system
 end

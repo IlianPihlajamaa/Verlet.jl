@@ -33,29 +33,27 @@ uses a CSR (compressed sparse row) layout for compact storage and fast iteration
 """
 function build_neighborlist(R::Vector{SVector{Dims,T}}, box::CubicBox{T}; cutoff::T, skin::T=T(0.3)) where {Dims,T}
     N = length(R)
-    IT = Int
     rlist2 = (cutoff + skin)^2
-    neighs = [Vector{IT}() for _ in 1:N]
-    Δ = zeros(T, Dims)
+    neighs = [Vector{T_int}() for _ in 1:N]
     @inbounds for i in 1:N-1
         ri = R[i]
         for j in i+1:N
             rj = R[j]
-            Δ .= ri - rj
-            minimum_image!(Δ, box)
+            Δ = ri - rj
+            Δ = minimum_image(Δ, box)
             r2 = dot(Δ, Δ)
             if r2 <= rlist2
-                push!(neighs[i], IT(j))
-                push!(neighs[j], IT(i))
+                push!(neighs[i], T_int(j))
+                push!(neighs[j], T_int(i))
             end
         end
     end
-    offsets = Vector{IT}(undef, N+1)
-    offsets[1] = IT(1)
+    offsets = Vector{T_int}(undef, N+1)
+    offsets[1] = T_int(1)
     @inbounds for i in 1:N
-        offsets[i+1] = offsets[i] + IT(length(neighs[i]))
+        offsets[i+1] = offsets[i] + T_int(length(neighs[i]))
     end
-    pairs = Vector{IT}(undef, Int(offsets[end])-1)
+    pairs = Vector{T_int}(undef, Int(offsets[end])-1)
     @inbounds for i in 1:N
         start = offsets[i]
         stop  = offsets[i+1]-1
@@ -63,32 +61,10 @@ function build_neighborlist(R::Vector{SVector{Dims,T}}, box::CubicBox{T}; cutoff
             pairs[start:stop] = neighs[i]
         end
     end
-    NeighborList{IT,T, Dims}(cutoff, skin, pairs, offsets, copy(R))
+    NeighborList{T_int,T, Dims}(cutoff, skin, pairs, offsets, copy(R))
 end
 
-"""
-    max_displacement_since_build(nlist, R, box) -> Float64
 
-Return the maximum particle displacement (with minimum-image convention) since `nlist` was built.
-Used internally by `maybe_rebuild!`.
-"""
-function max_displacement_since_build(nlist::NeighborList{IT,T, Dims}, R::Vector{SVector{Dims,T}}, box::CubicBox{T}) where {IT,T,Dims}
-    N = length(R)
-    @assert length(nlist.ref_positions) == N
-    Δ = zeros(T, Dims)
-    maxdisp = 0.0
-    @inbounds for i in 1:N
-        ri = R[i]
-        r0 = nlist.ref_positions[i]
-        Δ .= ri - r0
-        minimum_image!(Δ, box)
-        d = maximum(abs, Δ)
-        if d > maxdisp
-            maxdisp = d
-        end
-    end
-    return maxdisp
-end
 
 """
     maybe_rebuild!(nlist, R, box) -> Bool
@@ -103,7 +79,7 @@ function maybe_rebuild!(nlist::NeighborList{IT,T, Dims}, R::Vector{SVector{Dims,
         newnl = build_neighborlist(R, box; cutoff=nlist.cutoff, skin=nlist.skin)
         nlist.pairs = newnl.pairs
         nlist.offsets = newnl.offsets
-        nlist.ref_positions = newnl.ref_positions
+        nlist.ref_positions .= newnl.ref_positions
         return true
     else
         return false
@@ -117,7 +93,7 @@ Compute Lennard–Jones forces using a prebuilt [`NeighborList`](@ref).
 This is more efficient than the brute-force O(N²) kernel, scaling ~O(N) for fixed density.
 
 Arguments
-- `R::AbstractMatrix`: positions (N×D).
+- `R::Vector{SVector{Dims,T}}`: positions.
 - `box::CubicBox`: periodic cubic box.
 - `nlist::NeighborList`: neighbor list built with at least the requested cutoff.
 
@@ -129,13 +105,13 @@ Keywords
 - `return_potential::Bool`: if true, also return total potential energy.
 
 Returns
-- `F::Matrix`: force on each particle (same shape as `R`).
+- `F::Vector{SVector{Dims,T}}`: force on each particle (same shape as `R`).
 - `U::Float64` (if `return_potential=true`).
 
 Example
 ```@example
 box = CubicBox(8.0)
-R = randn(10,3)
+R = randn(SVector{3, Float64}, 10)
 wrap_positions!(R, box)
 nlist = build_neighborlist(R, box; cutoff=2.5, skin=0.4)
 F, U = lj_forces(R, box, nlist; rcut=2.5, return_potential=true)
@@ -159,7 +135,6 @@ function lj_forces(R::Vector{SVector{Dims,T}}, box::CubicBox{T}, nlist::Neighbor
         Uc  = 4*float(ϵ)*(s6c^2 - s6c)
     end
 
-    Δ = zeros(T, Dims)
     @inbounds for i in 1:N
         ri = R[i]
         for idx in nlist.offsets[i]:(nlist.offsets[i+1]-1)
@@ -167,8 +142,8 @@ function lj_forces(R::Vector{SVector{Dims,T}}, box::CubicBox{T}, nlist::Neighbor
             # Apply each symmetric pair once
             if j > i
                 rj = R[j]
-                Δ .= ri - rj
-                minimum_image!(Δ, box)
+                Δ = ri - rj
+                Δ = minimum_image(Δ, box)
                 r2 = dot(Δ, Δ)
                 if r2 == 0.0
                     continue
@@ -194,11 +169,11 @@ end
 
 
 
-function lj_forces(positions::AbstractMatrix, box::CubicBox;
+function lj_forces(positions::Vector{SVector{Dims,T}}, box::CubicBox;
                    ϵ::Real=1.0, σ::Real=1.0, rcut::Real=Inf,
-                   shift::Bool=false, return_potential::Bool=false)
-    N, D = size(positions)
-    F = zeros(Float64, N, D)
+                   shift::Bool=false, return_potential::Bool=false) where {Dims,T}
+    N = length(positions)
+    F = [zero(SVector{Dims,T}) for _ in 1:N]
     U = 0.0
 
     σ2 = float(σ)^2
@@ -211,14 +186,12 @@ function lj_forces(positions::AbstractMatrix, box::CubicBox;
         Uc  = 4*float(ϵ)*(s6c^2 - s6c)
     end
 
-    Δ = zeros(Float64, D)
-
     @inbounds for i in 1:N-1
-        ri = @view positions[i, :]
+        ri = positions[i]
         for j in i+1:N
-            rj = @view positions[j, :]
-            Δ .= ri .- rj
-            minimum_image!(Δ, box)
+            rj = positions[j]
+            Δ = ri - rj
+            Δ = minimum_image(Δ, box)
             r2 = dot(Δ, Δ)
             if r2 == 0.0
                 continue
@@ -228,11 +201,9 @@ function lj_forces(positions::AbstractMatrix, box::CubicBox;
                 s2 = σ2 * invr2
                 s6 = s2^3
                 fr_over_r = 24*float(ϵ)*(2*s6^2 - s6) * invr2
-                for k in 1:D
-                    f = fr_over_r * Δ[k]
-                    F[i,k] += f
-                    F[j,k] -= f
-                end
+                fvec = fr_over_r * Δ
+                F[i] += fvec
+                F[j] -= fvec
                 if return_potential
                     U += 4*float(ϵ)*(s6^2 - s6) - Uc
                 end

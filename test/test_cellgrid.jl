@@ -9,7 +9,10 @@ using Random
         N, D = 100, 3
         L = 12.0
         box = CubicBox(L)
-        R = rand(rng, N, D) .* L .- (L/2)
+        R = rand(rng, SVector{D, Float64}, N) .* L 
+        for i in 1:N
+            R[i] -= (L/2) * ones(SVector{D, Float64})
+        end
         wrap_positions!(R, box)
 
         rcut, skin = 2.5, 0.4
@@ -30,7 +33,10 @@ using Random
         N, D = 128, 3
         L = 15.0
         box = CubicBox(L)
-        R = rand(rng, N, D) .* L .- (L/2)
+        R = rand(rng, SVector{D, Float64}, N) .* L 
+        for i in 1:N
+            R[i] -= (L/2) * ones(SVector{D, Float64})
+        end
         wrap_positions!(R, box)
 
         cutoff, skin = 2.2, 0.5
@@ -42,11 +48,11 @@ using Random
             # Create a proper mutable vector for minimum_image! without @view on a broadcast
             Δ = Vector{Float64}(undef, 3)
             @inbounds begin
-                Δ[1] = R[i,1] - R[j,1]
-                Δ[2] = R[i,2] - R[j,2]
-                Δ[3] = R[i,3] - R[j,3]
+                Δ[1] = R[i][1] - R[j][1]
+                Δ[2] = R[i][2] - R[j][2]
+                Δ[3] = R[i][3] - R[j][3]
             end
-            minimum_image!(Δ, box)
+            Δ = minimum_image(Δ, box)
             if dot(Δ,Δ) ≤ rlist2 + 1e-12
                 push!(ref_pairs, (i,j))
             end
@@ -70,7 +76,10 @@ using Random
         N, D = 64, 3
         L = 12.0
         box = CubicBox(L)
-        R = rand(rng, N, D) .* L .- (L/2)
+        R = rand(rng, SVector{D, Float64}, N) .* L 
+        for i in 1:N
+            R[i] -= (L/2) * ones(SVector{D, Float64})
+        end
         wrap_positions!(R, box)
 
         ϵ, σ, cutoff, skin = 1.0, 1.0, 2.5, 0.4
@@ -88,7 +97,10 @@ using Random
         N, D = 80, 3
         L = 14.0
         box = CubicBox(L)
-        R = rand(rng, N, D) .* L .- (L/2)
+        R = rand(rng, SVector{D, Float64}, N) .* L 
+        for i in 1:N
+            R[i] -= (L/2) * ones(SVector{D, Float64})
+        end
         wrap_positions!(R, box)
 
         cutoff, skin = 2.5, 0.4
@@ -97,11 +109,13 @@ using Random
 
     # Small bounded move: ensure max per-particle displacement < skin/2
     δ = 0.9 * (skin/2) / sqrt(3)   # 10% safety margin under half-skin
-    R .+= δ .* (2 .* rand(rng, N, D) .- 1)
+    R += δ * (2 * rand(rng, SVector{D, Float64}, N) .- (ones(SVector{D, Float64}),))
+
+
     wrap_positions!(R, box)
     @test maybe_rebuild!(nlist, R, box) == false
-
-        R .+= 0.35 .* randn(rng, N, D); wrap_positions!(R, box)
+        R += 0.35 * randn(rng, SVector{D, Float64}, N)
+        wrap_positions!(R, box)
         if maybe_rebuild!(nlist, R, box)
             rebin!(grid, R, box)
             nlist2 = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)

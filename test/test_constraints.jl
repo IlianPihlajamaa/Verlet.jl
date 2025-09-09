@@ -64,7 +64,9 @@ using StaticArrays
     vel = [SVector{D,Float64}(1.0,1.0,1.0) for _ in 1:N]
     ps = ParticleSystem{D,Float64}(pos, vel, [1.0, 2.0, 3.0])
     remove_com_motion!(ps; which=:velocity)
-    Vcom = (sum(ps.masses .* map(x->x[1], ps.velocities))) / sum(ps.masses)
-    @test isapprox(Vcom, 0.0; atol=1e-14)
+
+    Vcom = sum(ps.masses[i] * ps.velocities[i] for i in 1:N) / sum(ps.masses)
+
+    @test all(isapprox.(Vcom, 0.0; atol=1e-14))
     end
 end

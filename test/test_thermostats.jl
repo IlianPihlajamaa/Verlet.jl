@@ -13,7 +13,8 @@ using StaticArrays
     Tt, kB = 2.0, 1.0
     dof = N*D
     @test degrees_of_freedom(ps) == dof
-    @test isapprox(instantaneous_temperature(ps; kB=kB), Tt; rtol=1e-12, atol=0)
+    Ti = instantaneous_temperature(ps; kB=kB)
+    @test isapprox(Ti, Tt; rtol=1e-12, atol=0)
     end
 
     @testset "velocity_rescale! matches target T" begin

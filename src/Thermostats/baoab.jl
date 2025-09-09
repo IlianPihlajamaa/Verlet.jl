@@ -173,8 +173,7 @@ T = 2 * KE / (kB * dof).
 function instantaneous_temperature(ps; kB::T_float=one(T_float))::T_float where {T_float}
     v = ps.velocities
     m = ps.masses
-    vsq = [sum(abs2.(vi)) for vi in v]     # N
-    KE = T_float(0.5) * sum(m .* vsq)   # scalar
+    KE = T_float(0.5) * sum(m[i] * sum(abs2.(v[i])) for i in eachindex(v))   # scalar
     dof = degrees_of_freedom(ps)
     return (T_float(2.0) * KE) / (kB * dof)
 end
@@ -187,7 +186,7 @@ Deterministically rescale velocities to match target temperature T.
 function velocity_rescale!(ps, T::Real; kB::Real=1.0)
     Tinst = instantaneous_temperature(ps; kB=kB)
     λ = sqrt(T / max(Tinst, eps()))
-    ps.velocities .= map(v -> v * λ, ps.velocities)
+    ps.velocities .*=  λ
     return ps
 end
 
@@ -328,7 +327,7 @@ function langevin_baoab_constrained!(ps::ParticleSystem, forces, dt, cons::Dista
     # --- O: OU stochastic velocity step
     c = exp(-γ*dt)
     for i in 1:N
-        ξ = SVector{D,Float64}(randn(rng, D)...)  # N(0,1) for each component
+        ξ = randn(SVector{D,Float64})  # N(0,1) for each component
         σ = sqrt((1 - c^2) * (kB * T) * invm[i])
         V[i] = c * V[i] + ξ * σ
     end

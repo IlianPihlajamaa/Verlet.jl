@@ -58,7 +58,7 @@ const Dims = 3
     @testset "CubicBox + minimum_image!" begin
         box = CubicBox(10.0)
         Δ = [ 6.0, -6.0,  0.1 ]  # in 3D
-        minimum_image!(Δ, box)
+        Δ = minimum_image(Δ, box)
         @test Δ[1] ==  6.0 - 10.0    # -> -4.0
         @test Δ[2] == -6.0 + 10.0    # ->  4.0
         @test isapprox(Δ[3], 0.1; atol=1e-12)

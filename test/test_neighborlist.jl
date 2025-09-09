@@ -22,7 +22,7 @@ Random.seed!(0xC0FFEE)
             for idx in nlist.offsets[i]:(nlist.offsets[i+1]-1)
                 j = nlist.pairs[idx]
                 Δ = R[i] - R[j]
-                minimum_image!(Δ, box)
+                Δ = minimum_image(Δ, box)
                 @test dot(Δ,Δ) <= rlist2 + 1e-12
             end
         end

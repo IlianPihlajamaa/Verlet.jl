@@ -40,7 +40,7 @@ end
     return ((cz - 1) * ny + (cy - 1)) * nx + cx
 end
 
-@inline function _coord_to_cell_idx(x::Float64, L::Float64, cell_size::Float64, n::Int)
+@inline function _coord_to_cell_idx(x::T_float, L::T_float, cell_size::T_float, n::Int)
     # Map position to [0, L) robustly, then to 1..n
     x0 = x + 0.5 * L
     x0 -= floor(x0 / L) * L   # now in [0, L)
@@ -56,9 +56,9 @@ end
 Create a new `CellGrid` sized for `cell_size` and bin positions `R` (N×3).
 Returns a populated grid with linked lists set for particle indices 1..N.
 """
-function build_cellgrid(R::AbstractMatrix, box; cell_size::Real)
-    @assert size(R,2) ≥ 3 "R must be N×3 (at least 3 columns)."
-    N = size(R,1)
+function build_cellgrid(R::AbstractVector, box; cell_size::Real)
+    @assert length(R[1]) == 3 "d=3"
+    N = length(R)
     L = float(box_length(box))
     # Choose number of cells so that the EFFECTIVE uniform width cs_eff = L/n ≥ requested cell_size.
     # This guarantees the standard 27-neighbor sweep is sufficient for a search radius ≤ cell_size.
@@ -68,7 +68,7 @@ function build_cellgrid(R::AbstractMatrix, box; cell_size::Real)
     heads = fill(Int(0), nx*nx*nx)
     nxt = fill(Int(0), N)
     # Store the *effective* cell size actually used for binning (uniform tiling)
-    grid = CellGrid{Int,Float64}(L, cs_eff, dims, heads, nxt)
+    grid = CellGrid{Int,T_float}(L, cs_eff, dims, heads, nxt)
     return rebin!(grid, R, box)
 end
 
@@ -78,12 +78,12 @@ end
 Reset the grid's `heads` and `next` and bin the positions `R` into cells
 according to the current `cell_size` and periodic cubic box `box`.
 """
-function rebin!(grid::CellGrid{IT,T}, R::AbstractMatrix, box) where {IT<:Integer,T<:Real}
-    @assert size(R,2) ≥ 3 "R must be N×3 (at least 3 columns)."
-    N = size(R,1)
-    L = Float64(grid.L)
+function rebin!(grid::CellGrid{IT,T}, R::AbstractVector, box) where {IT<:Integer,T<:Real}
+    @assert length(R[1]) == 3 "d=3"
+    N = length(R)
+    L = T_float(grid.L)
     nx, ny, nz = Int.(grid.dims)
-    cs = Float64(grid.cell_size)  # effective uniform width used for indexing
+    cs = T_float(grid.cell_size)  # effective uniform width used for indexing
 
     # Reset lists
     fill!(grid.heads, IT(0))
@@ -93,9 +93,10 @@ function rebin!(grid::CellGrid{IT,T}, R::AbstractMatrix, box) where {IT<:Integer
     fill!(grid.next, IT(0))
 
     @inbounds for i in 1:N
-        cx = _coord_to_cell_idx(Float64(R[i,1]), L, cs, nx)
-        cy = _coord_to_cell_idx(Float64(R[i,2]), L, cs, ny)
-        cz = _coord_to_cell_idx(Float64(R[i,3]), L, cs, nz)
+        r = R[i]
+        cx = _coord_to_cell_idx(T_float(r[1]), L, cs, nx)
+        cy = _coord_to_cell_idx(T_float(r[2]), L, cs, ny)
+        cz = _coord_to_cell_idx(T_float(r[3]), L, cs, nz)
         c  = _linear_index(cx, cy, cz, (nx, ny, nz))
         # push-front i into cell c
         grid.next[i] = grid.heads[c]

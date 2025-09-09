@@ -1,4 +1,3 @@
-
 """
     struct DistanceConstraints{T_int,T_float}
 
@@ -21,12 +20,12 @@ function DistanceConstraints(pairs::Vector{<:Tuple}, lengths::Vector{<:Real}; to
 end
 
 
-function _displacement!(Δ, ri, rj, cons::DistanceConstraints, box=nothing)
-    Δ .= ri - rj
+function _displacement!(ri, rj, cons::DistanceConstraints, box=nothing)
+    Δnew = ri - rj
     if cons.use_minimum_image && box !== nothing
-        minimum_image!(Δ, box)
+        Δnew = minimum_image(Δnew, box)
     end
-    return Δ
+    return Δnew
 end
 
 """
@@ -35,16 +34,13 @@ end
 Iteratively correct positions to satisfy constraints.
 """
 function apply_shake!(ps, cons::DistanceConstraints, dt)
-    N = length(ps.positions)
-    D = length(ps.positions[1])
-    Δ = zeros(eltype(ps.positions[1]), D)
     masses = ps.masses
     for iter in 1:cons.maxiter
         maxviol = 0.0
         for (k, (i, j)) in enumerate(zip(cons.i, cons.j))
             ri = ps.positions[i]
             rj = ps.positions[j]
-            _displacement!(Δ, ri, rj, cons)
+            Δ = _displacement!(ri, rj, cons)
             dist2 = dot(Δ, Δ)
             C = dist2 - cons.r0[k]^2
             maxviol = max(maxviol, abs(C))
@@ -71,16 +67,13 @@ end
 Correct velocities to satisfy velocity constraints.
 """
 function apply_rattle!(ps, cons::DistanceConstraints)
-    N = length(ps.positions)
-    D = length(ps.positions[1])
-    Δ = zeros(eltype(ps.positions[1]), D)
     masses = ps.masses
     for iter in 1:cons.maxiter
         maxviol = 0.0
         for (k, (i, j)) in enumerate(zip(cons.i, cons.j))
             ri = ps.positions[i]
             rj = ps.positions[j]
-            _displacement!(Δ, ri, rj, cons)
+            Δ = _displacement!(ri, rj, cons)
             vi = ps.velocities[i]
             vj = ps.velocities[j]
             vrel = vi - vj
@@ -132,11 +125,11 @@ function remove_com_motion!(ps; which=:velocity)
     m = ps.masses
     Mtot = sum(m)
     if which == :velocity || which == :both
-        Vcom = sum(ps.velocities .* m) / Mtot
+        Vcom = sum(ps.velocities[i] * m[i] for i in eachindex(m)) / Mtot
         ps.velocities .= ps.velocities .- Ref(Vcom)
     end
     if which == :position || which == :both
-        Rcom = sum(ps.positions .* m) / Mtot
+        Rcom = sum(ps.positions[i] * m[i] for i in eachindex(m)) / Mtot
         ps.positions .= ps.positions .- Ref(Rcom)
     end
     return ps
@@ -159,7 +152,7 @@ Returns a named tuple with `maxC`, `rmsC`, `maxCd`, `rmsCd`.
 
 Example
 ```julia
-ps = ParticleSystem([0.0 0 0; 1.0 0 0], zeros(2,3), ones(2))
+ps = ParticleSystem([SVector(0.0, 0, 0), SVector(1.0, 0, 0)], [SVector(0.0, 0, 0), SVector(0.0, 0, 0)], [1.0, 1.0])
 cons = DistanceConstraints([(1,2)], [1.0])
 constraint_residuals(ps, cons)
 ```
@@ -179,15 +172,12 @@ function constraint_residuals(ps, cons::DistanceConstraints)
     accC2  = 0.0
     accCd2 = 0.0
 
-    D = length(R[1])
-    d = zeros(eltype(R[1]), D)
-
     for ℓ in 1:L
         i = is[ℓ]
         j = js[ℓ]
         ri = R[i]
         rj = R[j]
-        _displacement!(d, ri, rj, cons)
+        d = _displacement!(ri, rj, cons)
         vij = V[i] - V[j]
 
         r0 = lengths[ℓ]
@@ -204,3 +194,4 @@ function constraint_residuals(ps, cons::DistanceConstraints)
     rmsCd = L == 0 ? 0.0 : sqrt(accCd2 / L)
     return (; maxC, rmsC, maxCd, rmsCd)
 end
+

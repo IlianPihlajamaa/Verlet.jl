@@ -13,7 +13,6 @@ A lightweight container for particle states.
 - `positions::Vector{SVector{Dims,T_float}}`: length-N vector of positions (each an SVector)
 - `velocities::Vector{SVector{Dims,T_float}}`: length-N vector of velocities
 - `masses::Vector{T_float}`: length-N vector of particle masses
-
 """
 mutable struct ParticleSystem{Dims,T_float}
     positions::Vector{SVector{Dims,T_float}}   # (N)
@@ -30,7 +29,6 @@ function kinetic_energy(system::ParticleSystem{Dims,T_float}) where {Dims,T_floa
     @assert length(system.positions) == length(system.velocities) "positions/velocities must be same size"
     @assert length(system.masses) == length(system.positions) "length(masses) must equal number of particles"
     Ekin = zero(T_float)
-
     for i in 1:length(system.positions)
         Ekin += T_float(0.5) * system.masses[i] * dot(system.velocities[i], system.velocities[i])
     end
