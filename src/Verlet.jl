@@ -8,11 +8,6 @@ include("Neighbors/Neighbors.jl")
 include("Constraints/Constraints.jl")
 include("Thermostats/Thermostats.jl")
 
-using .Core
-using .Neighbors
-using .Potentials
-using .Constraints
-using .Thermostats
 
 # Re-export public API for backward compatibility
 export ParticleSystem, velocity_verlet!, kinetic_energy, potential_energy

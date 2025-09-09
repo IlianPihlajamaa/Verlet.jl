@@ -136,7 +136,6 @@ velocity_rescale!
  # * `forces` is a callable returning an N×D array of forces given positions.
 
 using Random
-using ..Constraints: DistanceConstraints, apply_rattle!, apply_shake!
 
 """
     degrees_of_freedom(ps; constraints=nothing, remove_com=false) -> Int
