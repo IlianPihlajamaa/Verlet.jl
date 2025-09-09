@@ -157,11 +157,7 @@ function degrees_of_freedom(ps; constraints=nothing, remove_com::Bool=false)::In
     return max(dof, 0)
 end
 
-"""
-    degrees_of_freedom(ps) -> Int
 
-Backward-compatible method: returns `N*D` (no constraints, no COM removal).
-"""
 
 
 """
