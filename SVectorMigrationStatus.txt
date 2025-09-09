@@ -1,2 +1,0 @@
-# This file will be used to track the SVectors migration status for each file.
-# Format: filename: status (pending|in-progress|done)
