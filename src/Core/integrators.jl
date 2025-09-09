@@ -36,3 +36,5 @@ function potential_energy(system::ParticleSystem{Dims,T_float}, forces::Function
     end
     error("Force function does not support `return_potential=true`; cannot compute potential_energy.")
 end
+
+
