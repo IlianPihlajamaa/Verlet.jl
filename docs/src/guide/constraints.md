@@ -45,14 +45,18 @@ N, D = 2, 3
 positions = [@SVector zeros(D) for _ in 1:N]
 positions[2] = @SVector [1.2, 0.0, 0.0]   # initial bond slightly off
 velocities = [@SVector zeros(D) for _ in 1:N]
+forces = [@SVector zeros(D) for _ in 1:N]
 masses = ones(N)
-ps = ParticleSystem(positions, velocities, masses)
+box = CubicBox(10.0)
+types = ones(Int, N)
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
 cons = DistanceConstraints([(1,2)], [1.0])
-forces(R) = [@SVector zeros(D) for _ in R]  # no external forces
+forces_func(R) = [@SVector zeros(D) for _ in R]  # no external forces
 for step in 1:100
-  velocity_verlet_shake_rattle!(ps, forces, 0.01, cons)
+  velocity_verlet_shake_rattle!(sys, forces_func, 0.01, cons)
 end
-d = ps.positions[1] - ps.positions[2]
+d = sys.positions[1] - sys.positions[2]
 @show norm(d)  # ~1.0
 ```
 
@@ -78,10 +82,14 @@ using StaticArrays
 N, D = 3, 3
 positions = [@SVector zeros(D) for _ in 1:N]
 velocities = [@SVector zeros(D) for _ in 1:N]
+forces = [@SVector zeros(D) for _ in 1:N]
 masses = ones(N)
-ps = ParticleSystem(positions, velocities, masses)
+box = CubicBox(10.0)
+types = ones(Int, N)
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
 cons = DistanceConstraints([(1,2)], [1.0])
-dof = degrees_of_freedom(ps; constraints=cons, remove_com=true)
+dof = degrees_of_freedom(sys; constraints=cons, remove_com=true)
 @show dof
 ```
 
@@ -98,11 +106,15 @@ using StaticArrays
 N, D = 3, 3
 positions = [@SVector zeros(D) for _ in 1:N]
 velocities = [@SVector ones(D) for _ in 1:N]
+forces = [@SVector zeros(D) for _ in 1:N]
 masses = [1.0, 2.0, 3.0]
-ps = ParticleSystem(positions, velocities, masses)
-remove_com_motion!(ps; which=:velocity)
+box = CubicBox(10.0)
+types = ones(Int, N)
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
+remove_com_motion!(sys; which=:velocity)
 # After removal, COM velocity should be ~0
-Vcom = sum(ps.masses .* map(v -> v[1], ps.velocities)) / sum(ps.masses)
+Vcom = sum(sys.masses .* map(v -> v[1], sys.velocities)) / sum(sys.masses)
 @show Vcom
 ```
 
@@ -141,7 +153,7 @@ All positions, velocities, and forces are now represented as `Vector{SVector{D, 
 
 ## See Also
 
-- [`ParticleSystem`](@ref): container for positions, velocities, and masses.
+- [`System`](@ref): container for positions, velocities, and masses.
 - [`velocity_verlet!`](@ref): unconstrained Velocity-Verlet integrator.
 - [`degrees_of_freedom`](@ref): count effective translational degrees of freedom.
 - [`remove_com_motion!`](@ref): eliminate center-of-mass drift.
