@@ -1,10 +1,17 @@
 """
-    struct CubicBox{T<:Real}
+    abstract type AbstractBox{T<:AbstractFloat} end
+
+Abstract type for simulation boxes.
+"""
+abstract type AbstractBox{T<:AbstractFloat} end
+
+"""
+    struct CubicBox{T<:AbstractFloat} <: AbstractBox{T}
 
 Simple cubic periodic box with side length `L`.
 """
-struct CubicBox{T_float}
-    L::T_float
+struct CubicBox{T<:AbstractFloat} <: AbstractBox{T}
+    L::T
 end
 
 
@@ -32,7 +39,7 @@ This is useful before building neighbor lists or measuring displacements.
 
 The resulting positions will be in the range (-L/2, L/2].
 """
-function wrap_positions!(R::Vector{SVector{Dims, T}}, box::CubicBox) where {Dims,T}
+function wrap_positions!(R::Vector{SVector{Dims, T}}, box::CubicBox{T}) where {Dims,T<:AbstractFloat}
     for i in eachindex(R)
         R[i] = minimum_image(R[i], box)
     end

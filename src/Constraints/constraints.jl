@@ -29,18 +29,18 @@ function _displacement!(ri, rj, cons::DistanceConstraints, box=nothing)
 end
 
 """
-    apply_shake!(ps, cons, dt)
+    apply_shake!(sys, cons, dt)
 
 Iteratively correct positions to satisfy constraints.
 """
-function apply_shake!(ps, cons::DistanceConstraints, dt)
-    masses = ps.masses
+function apply_shake!(sys::System, cons::DistanceConstraints, dt)
+    masses = sys.masses
     for iter in 1:cons.maxiter
         maxviol = 0.0
         for (k, (i, j)) in enumerate(zip(cons.i, cons.j))
-            ri = ps.positions[i]
-            rj = ps.positions[j]
-            Δ = _displacement!(ri, rj, cons)
+            ri = sys.positions[i]
+            rj = sys.positions[j]
+            Δ = _displacement!(ri, rj, cons, sys.box)
             dist2 = dot(Δ, Δ)
             C = dist2 - cons.r0[k]^2
             maxviol = max(maxviol, abs(C))
@@ -50,8 +50,8 @@ function apply_shake!(ps, cons::DistanceConstraints, dt)
                     error("Constraint ill-conditioned: σ≈0 between atoms $i and $j")
                 end
                 Δλ = -C / (2σ)
-                ps.positions[i] += (Δλ / masses[i]) * Δ
-                ps.positions[j] -= (Δλ / masses[j]) * Δ
+                sys.positions[i] += (Δλ / masses[i]) * Δ
+                sys.positions[j] -= (Δλ / masses[j]) * Δ
             end
         end
         if maxviol <= cons.tol
@@ -62,28 +62,28 @@ function apply_shake!(ps, cons::DistanceConstraints, dt)
 end
 
 """
-    apply_rattle!(ps, cons)
+    apply_rattle!(sys, cons)
 
 Correct velocities to satisfy velocity constraints.
 """
-function apply_rattle!(ps, cons::DistanceConstraints)
-    masses = ps.masses
+function apply_rattle!(sys::System, cons::DistanceConstraints)
+    masses = sys.masses
     for iter in 1:cons.maxiter
         maxviol = 0.0
         for (k, (i, j)) in enumerate(zip(cons.i, cons.j))
-            ri = ps.positions[i]
-            rj = ps.positions[j]
-            Δ = _displacement!(ri, rj, cons)
-            vi = ps.velocities[i]
-            vj = ps.velocities[j]
+            ri = sys.positions[i]
+            rj = sys.positions[j]
+            Δ = _displacement!(ri, rj, cons, sys.box)
+            vi = sys.velocities[i]
+            vj = sys.velocities[j]
             vrel = vi - vj
             dotdv = dot(Δ, vrel)
             maxviol = max(maxviol, abs(dotdv))
             if abs(dotdv) > cons.tol
                 τ = (1/masses[i] + 1/masses[j]) * dot(Δ, Δ)
                 μ = -dotdv / τ
-                ps.velocities[i] += (μ / masses[i]) * Δ
-                ps.velocities[j] -= (μ / masses[j]) * Δ
+                sys.velocities[i] += (μ / masses[i]) * Δ
+                sys.velocities[j] -= (μ / masses[j]) * Δ
             end
         end
         if maxviol <= cons.tol
@@ -94,52 +94,52 @@ function apply_rattle!(ps, cons::DistanceConstraints)
 end
 
 """
-    velocity_verlet_shake_rattle!(ps, forces, dt, cons)
+    velocity_verlet_shake_rattle!(sys, forces, dt, cons)
 
 Constrained velocity Verlet step with SHAKE/RATTLE.
 """
-function velocity_verlet_shake_rattle!(ps, forces, dt, cons::DistanceConstraints)
-    invm = 1.0 ./ ps.masses
+function velocity_verlet_shake_rattle!(sys::System, forces, dt, cons::DistanceConstraints)
+    invm = 1.0 ./ sys.masses
     # Half kick
-    F = forces(ps.positions)
-    ps.velocities .= ps.velocities .+ 0.5 .* dt .* F .* invm
+    F = forces(sys.positions)
+    sys.velocities .= sys.velocities .+ 0.5 .* dt .* F .* invm
     # Drift
-    ps.positions .= ps.positions .+ dt .* ps.velocities
+    sys.positions .= sys.positions .+ dt .* sys.velocities
     # SHAKE
-    apply_shake!(ps, cons, dt)
+    apply_shake!(sys, cons, dt)
     # New forces
-    F = forces(ps.positions)
+    F = forces(sys.positions)
     # Half kick
-    ps.velocities .= ps.velocities .+ 0.5 .* dt .* F .* invm
+    sys.velocities .= sys.velocities .+ 0.5 .* dt .* F .* invm
     # RATTLE
-    apply_rattle!(ps, cons)
-    return ps
+    apply_rattle!(sys, cons)
+    return sys
 end
 
 """
-    remove_com_motion!(ps; which=:velocity)
+    remove_com_motion!(sys; which=:velocity)
 
 Remove center-of-mass motion from velocities/positions.
 """
-function remove_com_motion!(ps; which=:velocity)
-    m = ps.masses
+function remove_com_motion!(sys::System; which=:velocity)
+    m = sys.masses
     Mtot = sum(m)
     if which == :velocity || which == :both
-        Vcom = sum(ps.velocities[i] * m[i] for i in eachindex(m)) / Mtot
-        ps.velocities .= ps.velocities .- Ref(Vcom)
+        Vcom = sum(sys.velocities[i] * m[i] for i in eachindex(m)) / Mtot
+        sys.velocities .= sys.velocities .- Ref(Vcom)
     end
     if which == :position || which == :both
-        Rcom = sum(ps.positions[i] * m[i] for i in eachindex(m)) / Mtot
-        ps.positions .= ps.positions .- Ref(Rcom)
+        Rcom = sum(sys.positions[i] * m[i] for i in eachindex(m)) / Mtot
+        sys.positions .= sys.positions .- Ref(Rcom)
     end
-    return ps
+    return sys
 end
 
 # ------------------------------------------------------------
 # Constraint residual monitoring (docstring and example)
 # ------------------------------------------------------------
 """
-    constraint_residuals(ps::ParticleSystem, cons::DistanceConstraints) -> (; maxC, rmsC, maxCd, rmsCd)
+    constraint_residuals(sys::System, cons::DistanceConstraints) -> (; maxC, rmsC, maxCd, rmsCd)
 
 Compute the constraint residuals for a system subject to pairwise distance constraints.
 
@@ -152,14 +152,22 @@ Returns a named tuple with `maxC`, `rmsC`, `maxCd`, `rmsCd`.
 
 Example
 ```julia
-ps = ParticleSystem([SVector(0.0, 0, 0), SVector(1.0, 0, 0)], [SVector(0.0, 0, 0), SVector(0.0, 0, 0)], [1.0, 1.0])
+sys = System(
+    [SVector(0.0, 0, 0), SVector(1.0, 0, 0)],
+    [SVector(0.0, 0, 0), SVector(0.0, 0, 0)],
+    [SVector(0.0, 0, 0), SVector(0.0, 0, 0)],
+    [1.0, 1.0],
+    CubicBox(10.0),
+    [1, 1],
+    Dict(1 => :A)
+)
 cons = DistanceConstraints([(1,2)], [1.0])
-constraint_residuals(ps, cons)
+constraint_residuals(sys, cons)
 ```
 """
-function constraint_residuals(ps, cons::DistanceConstraints)
-    R = ps.positions
-    V = ps.velocities
+function constraint_residuals(sys::System, cons::DistanceConstraints)
+    R = sys.positions
+    V = sys.velocities
 
     # Use the actual fields of DistanceConstraints
     is = cons.i
@@ -177,7 +185,7 @@ function constraint_residuals(ps, cons::DistanceConstraints)
         j = js[ℓ]
         ri = R[i]
         rj = R[j]
-        d = _displacement!(ri, rj, cons)
+        d = _displacement!(ri, rj, cons, sys.box)
         vij = V[i] - V[j]
 
         r0 = lengths[ℓ]
@@ -194,4 +202,3 @@ function constraint_residuals(ps, cons::DistanceConstraints)
     rmsCd = L == 0 ? 0.0 : sqrt(accCd2 / L)
     return (; maxC, rmsC, maxCd, rmsCd)
 end
-

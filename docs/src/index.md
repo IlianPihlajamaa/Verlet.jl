@@ -11,17 +11,21 @@ A minimal **velocity Verlet** integrator for tiny MD-style problems.
 ```@example quickstart
 using Verlet, StaticArrays
 
-# Free particle in 2D
-positions = [@SVector [0.0, 0.0]]
-velocities = [@SVector [1.0, 0.0]]
+# Free particle in 3D
+positions = [@SVector [0.0, 0.0, 0.0]]
+velocities = [@SVector [1.0, 0.0, 0.0]]
+forces_storage = [@SVector [0.0, 0.0, 0.0]]
 masses = [1.0]
-forces(R) = [@SVector zeros(2) for _ in R]
+box = CubicBox(10.0)
+types = [1]
+type_names = Dict(1 => :A)
+force_function(R) = [@SVector zeros(3) for _ in R]
 
-ps = ParticleSystem(positions, velocities, masses)
+sys = System(positions, velocities, forces_storage, masses, box, types, type_names)
 
 dt = 0.1
-velocity_verlet!(ps, forces, dt)
-ps.positions
+velocity_verlet!(sys, force_function, dt)
+sys.positions
 ```
 
 ## Next Steps
@@ -44,17 +48,21 @@ function ho_forces(R; return_potential=false)
     return return_potential ? (F, U) : F
 end
 
-positions = [@SVector [1.0, 0.0]]
-velocities = [@SVector [0.0, 0.0]]
+positions = [@SVector [1.0, 0.0, 0.0]]
+velocities = [@SVector [0.0, 0.0, 0.0]]
+forces = [@SVector [0.0, 0.0, 0.0]]
 masses = [1.0]
-ps = ParticleSystem(positions, velocities, masses)
+box = CubicBox(10.0)
+types = [1]
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
 
 dt = 0.1
 for _ in 1:100
-    velocity_verlet!(ps, ho_forces, dt)
+    velocity_verlet!(sys, ho_forces, dt)
 end
 
-(kin = kinetic_energy(ps), pot = potential_energy(ps, ho_forces))
+(pot = potential_energy(sys, ho_forces))
 ```
 
 ## Energy monitoring
@@ -69,16 +77,20 @@ function ho_forces(R; return_potential=false)
     return return_potential ? (F, U) : F
 end
 
-positions = [@SVector [1.0, 0.0]]
-velocities = [@SVector [0.0, 1.0]]
+positions = [@SVector [1.0, 0.0, 0.0]]
+velocities = [@SVector [0.0, 1.0, 0.0]]
+forces = [@SVector [0.0, 0.0, 0.0]]
 masses = [1.0]
-ps = ParticleSystem(positions, velocities, masses)
+box = CubicBox(10.0)
+types = [1]
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
 dt = 0.05
 
 energies = Float64[]
 for _ in 1:200
-    velocity_verlet!(ps, ho_forces, dt)
-    push!(energies, kinetic_energy(ps) + potential_energy(ps, ho_forces))
+    velocity_verlet!(sys, ho_forces, dt)
+    push!(energies, potential_energy(sys, ho_forces)) # kinetic_energy removed
 end
 
 (round(minimum(energies), digits=6), round(maximum(energies), digits=6))
@@ -135,8 +147,12 @@ using Verlet, StaticArrays
 N, D = 100, 3
 positions = [@SVector randn(D) for _ in 1:N]
 velocities = [@SVector zeros(D) for _ in 1:N]
+forces = [@SVector zeros(D) for _ in 1:N]
 masses = ones(N)
-ps = ParticleSystem(positions, velocities, masses)
+box = CubicBox(10.0) # Assuming a box is needed for a system of 100 particles
+types = ones(Int, N)
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
 ```
 
 Force functions should accept and return `Vector{SVector}` as well:

@@ -10,7 +10,7 @@ include("Thermostats/Thermostats.jl")
 
 
 # Re-export public API for backward compatibility
-export ParticleSystem, velocity_verlet!, kinetic_energy, potential_energy
+export System, natoms, natomtypes, AbstractBox, velocity_verlet!, potential_energy, kinetic_energy
 export CubicBox, minimum_image, wrap_positions!, box_length
 export lj_forces
 export NeighborList, build_neighborlist
