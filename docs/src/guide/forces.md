@@ -50,11 +50,15 @@ function ho_forces(R; return_potential=false)
     U = 0.5 * sum(norm(r)^2 for r in R)
     return return_potential ? (F, U) : F
 end
-positions = [@SVector [1.0, 0.0]]
-velocities = [@SVector [0.0, 0.0]]
+positions = [@SVector [1.0, 0.0, 0.0]]
+velocities = [@SVector [0.0, 0.0, 0.0]]
+forces = [@SVector [0.0, 0.0, 0.0]]
 masses = [1.0]
-ps = ParticleSystem(positions, velocities, masses)
-E = potential_energy(ps, ho_forces)
+box = CubicBox(10.0)
+types = [1]
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
+E = potential_energy(sys, ho_forces)
 E
 ```
 

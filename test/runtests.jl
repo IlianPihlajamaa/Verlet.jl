@@ -4,6 +4,7 @@ using Verlet
 using LinearAlgebra, StaticArrays
 
 # Core unit tests
+include("test_system.jl")
 include("test_core.jl")
 
 # Neighborlist and cellgrid acceptance tests

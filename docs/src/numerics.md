@@ -24,7 +24,7 @@ For constrained systems, users who want diagnostics consistent with statistical 
 should instead call:
 
 ```julia
-degrees_of_freedom(ps; constraints=cons, remove_com=false)
+degrees_of_freedom(sys; constraints=cons, remove_com=false)
 ```
 
 and use this value in temperature calculations.

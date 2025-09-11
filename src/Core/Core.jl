@@ -17,9 +17,9 @@ const T_int = default_int()
 const Dims = 3  # spatial dimensionality (default, can be overridden)
 
 
+include("boxes.jl")
 include("particles.jl")
 include("integrators.jl")
 include("forces.jl")
-include("boxes.jl")
 
 

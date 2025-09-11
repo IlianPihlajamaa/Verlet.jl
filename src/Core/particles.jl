@@ -1,36 +1,76 @@
-
-# Implementation for particle state, e.g. ParticleSystem, CubicBox
 using StaticArrays, LinearAlgebra
 
-
-
 """
-    ParticleSystem{Dims,T_float}
+    System(T<:AbstractFloat, IT<:Integer, Dims)
 
-A lightweight container for particle states.
+A flexible and type-stable container for particle-based simulations.
+
+# Type Parameters
+- `T<:AbstractFloat`: Floating-point type for particle properties (e.g., `Float32`, `Float64`).
+- `IT<:Integer`: Integer type for particle indices and types (e.g., `Int32`, `Int64`).
+- `Dims`: The number of spatial dimensions.
 
 # Fields
-- `positions::Vector{SVector{Dims,T_float}}`: length-N vector of positions (each an SVector)
-- `velocities::Vector{SVector{Dims,T_float}}`: length-N vector of velocities
-- `masses::Vector{T_float}`: length-N vector of particle masses
+- `positions::Vector{SVector{Dims, T}}`: Particle positions.
+- `velocities::Vector{SVector{Dims, T}}`: Particle velocities.
+- `forces::Vector{SVector{Dims, T}}`: Forces acting on particles.
+- `masses::Vector{T}`: Particle masses.
+- `box::AbstractBox{T}`: Simulation box defining the periodic boundary conditions.
+- `types::Vector{IT}`: Particle type identifiers (integers).
+- `type_names::Dict{IT, Symbol}`: Mapping from type identifiers to descriptive names (e.g., `1 => :H`).
+- `natoms::IT`: Total number of atoms.
 """
-mutable struct ParticleSystem{Dims,T_float}
-    positions::Vector{SVector{Dims,T_float}}   # (N)
-    velocities::Vector{SVector{Dims,T_float}}  # (N)
-    masses::Vector{T_float}                    # (N)
+struct System{T<:AbstractFloat,IT<:Integer,Dims}
+    positions::Vector{SVector{Dims,T}}
+    velocities::Vector{SVector{Dims,T}}
+    forces::Vector{SVector{Dims,T}}
+    masses::Vector{T}
+    box::AbstractBox{T}
+    types::Vector{IT}
+    type_names::Dict{IT,Symbol}
+    natoms::IT
+
+    function System(
+        positions::Vector{SVector{Dims,T}},
+        velocities::Vector{SVector{Dims,T}},
+        forces::Vector{SVector{Dims,T}},
+        masses::Vector{T},
+        box::AbstractBox{T},
+        types::Vector{IT},
+        type_names::Dict{IT,Symbol},
+    ) where {T<:AbstractFloat,IT<:Integer,Dims}
+        natoms = length(positions)
+        @assert length(velocities) == natoms "velocities must be same size as positions"
+        @assert length(forces) == natoms "forces must be same size as positions"
+        @assert length(masses) == natoms "masses must be same size as positions"
+        @assert length(types) == natoms "types must be same size as positions"
+        new{T,IT,Dims}(positions, velocities, forces, masses, box, types, type_names, natoms)
+    end
 end
 
 """
-    kinetic_energy(system::ParticleSystem) -> T_float
+    natoms(sys::System) -> Integer
+
+Get the number of atoms in the system.
+"""
+natoms(sys::System) = sys.natoms
+
+"""
+    natomtypes(sys::System) -> Int
+
+Get the number of unique atom types in the system.
+"""
+natomtypes(sys::System) = length(sys.type_names)
+
+"""
+    kinetic_energy(sys::System) -> T
 
 Total kinetic energy: `∑ ½ mᵢ ‖vᵢ‖²`.
 """
-function kinetic_energy(system::ParticleSystem{Dims,T_float}) where {Dims,T_float}
-    @assert length(system.positions) == length(system.velocities) "positions/velocities must be same size"
-    @assert length(system.masses) == length(system.positions) "length(masses) must equal number of particles"
-    Ekin = zero(T_float)
-    for i in 1:length(system.positions)
-        Ekin += T_float(0.5) * system.masses[i] * dot(system.velocities[i], system.velocities[i])
+function kinetic_energy(sys::System{T,IT,Dims}) where {T,IT,Dims}
+    Ekin = zero(T)
+    for i in 1:natoms(sys)
+        Ekin += T(0.5) * sys.masses[i] * dot(sys.velocities[i], sys.velocities[i])
     end
     return Ekin
 end

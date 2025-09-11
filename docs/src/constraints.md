@@ -16,10 +16,14 @@ satisfied at a given state:
 using Verlet, StaticArrays
 positions = [SVector{3}(0.0, 0.0, 0.0), SVector{3}(1.0, 0.0, 0.0)]
 velocities = [SVector{3}(0.0, 0.0, 0.0) for _ in 1:2]
+forces = [SVector{3}(0.0, 0.0, 0.0) for _ in 1:2]
 masses = ones(2)
-ps = ParticleSystem(positions, velocities, masses)
+box = CubicBox(10.0)
+types = [1, 1]
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
 cons = DistanceConstraints([(1,2)], [1.0])
-constraint_residuals(ps, cons)
+constraint_residuals(sys, cons)
 ```
 
 These values are useful for debugging and regression testing.
