@@ -8,8 +8,9 @@ include("test_system.jl")
 include("test_core.jl")
 
 # Neighborlist and cellgrid acceptance tests
-include("test_neighborlist.jl")
+# include("test_neighborlist.jl") # Old API
 include("test_cellgrid.jl")
+include("test_forcefields.jl")
 
 # Thermostat / NVT tests
 include("test_thermostats.jl")

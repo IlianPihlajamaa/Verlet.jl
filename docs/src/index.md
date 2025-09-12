@@ -11,7 +11,7 @@ A minimal **velocity Verlet** integrator for tiny MD-style problems.
 ```@example quickstart
 using Verlet, StaticArrays
 
-# Free particle in 3D
+# 1. Set up the system
 positions = [@SVector [0.0, 0.0, 0.0]]
 velocities = [@SVector [1.0, 0.0, 0.0]]
 forces_storage = [@SVector [0.0, 0.0, 0.0]]
@@ -19,12 +19,33 @@ masses = [1.0]
 box = CubicBox(10.0)
 types = [1]
 type_names = Dict(1 => :A)
-force_function(R) = [@SVector zeros(3) for _ in R]
-
 sys = System(positions, velocities, forces_storage, masses, box, types, type_names)
 
+# 2. Define a potential (e.g., Lennard-Jones)
+# Note: For a single particle, the force will be zero. This is just for demonstration.
+ϵ = 1.0
+σ = 1.0
+rc = 2.5
+lj_pair = LJPair(ϵ, σ, rc)
+params = PairTable(fill(lj_pair, (1, 1)))
+exclusions = Tuple{T_int,T_int}[]
+lj = LennardJones(params, exclusions, 0.5)
+ff = ForceField((lj,))
+
+# 3. Define a force function compatible with the integrator
+function compute_forces_for_integrator(positions, system, forcefield, master_nl)
+    system.positions .= positions # Update positions in the system object
+    build_all_neighbors!(master_nl, forcefield, system)
+    compute_all_forces!(system, forcefield)
+    return system.forces
+end
+
+# 4. Run the simulation
 dt = 0.1
-velocity_verlet!(sys, force_function, dt)
+master_nl = MasterNeighborList(0.5)
+# Wrap the force function to match the integrator's signature
+force_wrapper(R) = compute_forces_for_integrator(R, sys, ff, master_nl)
+velocity_verlet!(sys, force_wrapper, dt)
 sys.positions
 ```
 
@@ -62,7 +83,7 @@ for _ in 1:100
     velocity_verlet!(sys, ho_forces, dt)
 end
 
-(pot = potential_energy(sys, ho_forces))
+(pot = ho_forces(sys.positions, return_potential=true)[2])
 ```
 
 ## Energy monitoring
@@ -90,7 +111,7 @@ dt = 0.05
 energies = Float64[]
 for _ in 1:200
     velocity_verlet!(sys, ho_forces, dt)
-    push!(energies, potential_energy(sys, ho_forces)) # kinetic_energy removed
+    push!(energies, ho_forces(sys.positions, return_potential=true)[2]) # kinetic_energy removed
 end
 
 (round(minimum(energies), digits=6), round(maximum(energies), digits=6))
@@ -107,136 +128,200 @@ See also: \[Numerics & Pitfalls]\(@ref numerics).
 With constraints, you can simulate rigid bonds (e.g. water models) and safely
 increase timestep sizes while preserving stability.
 
-## Speeding up LJ with a Neighbor List
+## ForceField API for Potentials
 
-The naive Lennard–Jones force kernel scales as **O(N²)**, which quickly becomes expensive as the number of particles grows.
-A **Verlet neighbor list** reduces this to **O(N)** on average at fixed density by storing nearby pairs and updating them only occasionally.
+The recommended way to handle pair potentials like Lennard-Jones is with the `ForceField` API. This provides a flexible way to combine multiple potentials and uses an efficient neighbor list implementation.
 
 ```@example
-using Verlet
+using Verlet, StaticArrays
 
-# Create a cubic periodic box
+# 1. Set up a system
 box = CubicBox(20.0)
-
-using StaticArrays
-# Random positions for 100 particles in 3D as SVectors
 R = [@SVector randn(3) for _ in 1:100]
 wrap_positions!(R, box)
+sys = System(
+    R,
+    [@SVector(zeros(3)) for _ in R],
+    [@SVector(zeros(3)) for _ in R],
+    ones(length(R)),
+    box,
+    ones(Int, length(R)),
+    Dict(1 => :A)
+)
 
-# Build neighbor list with cutoff + skin
-nlist = build_neighborlist(R, box; cutoff=2.5, skin=0.4)
+# 2. Define a Lennard-Jones potential
+lj = LennardJones(
+    PairTable(fill(LJPair(1.0, 1.0, 2.5), (1, 1))),
+    Tuple{T_int,T_int}[],
+    0.5
+)
 
-# Rebuild when particles have moved far enough
-maybe_rebuild!(nlist, R, box) && @info "Neighbor list rebuilt"
+# 3. Create a ForceField
+ff = ForceField((lj,))
 
-# Compute forces using the list-aware kernel
-F, U = lj_forces(R, box, nlist; rcut=2.5, return_potential=true)
-@show size(F), U
+# 4. Build neighbor lists and compute forces
+master_skin = 0.5
+master_nl = MasterNeighborList(master_skin)
+build_all_neighbors!(master_nl, ff, sys)
+compute_all_forces!(sys, ff)
+
+@show sys.forces[1]
 ```
 
-### API
+### Neighbor List Methods
 
-See the full API reference in `api.md`.
-
-## Note on Particle Representation
-
-Verlet.jl now uses `Vector{SVector{Dims, T_Float}}` (from StaticArrays) to represent particle positions, velocities, displacements, and forces. This provides better performance and type stability compared to the previous `Matrix`-based approach. All user code and force functions should now expect and return vectors of SVectors, e.g.:
-
-```@example 1
-using Verlet, StaticArrays
-N, D = 100, 3
-positions = [@SVector randn(D) for _ in 1:N]
-velocities = [@SVector zeros(D) for _ in 1:N]
-forces = [@SVector zeros(D) for _ in 1:N]
-masses = ones(N)
-box = CubicBox(10.0) # Assuming a box is needed for a system of 100 particles
-types = ones(Int, N)
-type_names = Dict(1 => :A)
-sys = System(positions, velocities, forces, masses, box, types, type_names)
-```
-
-Force functions should accept and return `Vector{SVector}` as well:
+You can choose the neighbor list algorithm with the `method` keyword in `build_all_neighbors!`:
+- `:cells` (default): Fast `O(N)` cell-based algorithm.
+- `:bruteforce`: Slower `O(N^2)` algorithm for debugging.
+- `:all_pairs`: Includes all pairs, ignoring cutoffs.
 
 ```julia
-function my_forces(R)
-    # R is Vector{SVector{D, T}}
-    return [@SVector zeros(length(R[1])) for _ in R]
-end
+master_nl = MasterNeighborList(master_skin)
+build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)
 ```
 
-## NEW: O(N) Build with Cell-Linked Lists + Half Neighbor Lists
+- [`build_master_neighborlist!`](@ref) — construct a new master neighbor list.
+- [`wrap_positions!`](@ref) — enforce periodic wrapping of coordinates.
 
-The classic `build_neighborlist` uses an **O(N²)** construction. For larger systems
-you can switch to a **cell-linked grid** builder that is **O(N)** at fixed density
-and emits a **half list** (each pair stored once with `j > i`):
+# 4. Run the simulation
+dt = 0.1
+# Wrap the force function to match the integrator's signature
+force_wrapper(R) = compute_forces_for_integrator(R, sys, ff)
+velocity_verlet!(sys, force_wrapper, dt)
+sys.positions
+```
 
-```@example 1
-D = 3
+## Next Steps
+
+Check out the \[Guide → Constrained Dynamics](@ref constraints-guide) section to learn how to:
+
+- Set up bond constraints with [`DistanceConstraints`](@ref)
+- Run constrained dynamics with [`velocity_verlet_shake_rattle!`](@ref)
+
+
+## Harmonic oscillator
+
+```@example ho
+using Verlet, StaticArrays, LinearAlgebra
+
+# Hooke's law with k = 1, potential U = 0.5 * |r|^2
+function ho_forces(R; return_potential=false)
+    F = [-r for r in R]
+    U = 0.5 * sum(norm(r)^2 for r in R)
+    return return_potential ? (F, U) : F
+end
+
+positions = [@SVector [1.0, 0.0, 0.0]]
+velocities = [@SVector [0.0, 0.0, 0.0]]
+forces = [@SVector [0.0, 0.0, 0.0]]
+masses = [1.0]
 box = CubicBox(10.0)
-cutoff, skin = 2.5, 0.4
-R = [SVector{D}((rand(D) .- 0.5) .* box.L) for _ in 1:2_000]  # random positions in (-L/2, L/2]
-wrap_positions!(R, box)
-grid = build_cellgrid(R, box; cell_size=cutoff+skin)
-nl = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
-# Force evaluation with half list (branch-free inner loop)
-F = lj_forces(R, box, nl; rcut=cutoff)  # or (F,U) with return_potential=true
-size(F)
-```
+types = [1]
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
 
-### Why half lists?
-
-\* **Less memory**: store each pair once (≈½ the entries of a symmetric list).
-\* **Fewer branches**: kernel no longer checks `j > i` at runtime.
-\* **Same physics**: forces are accumulated for both `i` and `j` when a pair is visited.
-
-### Rebuild policy
-
-Use the same **half-skin rule** via `maybe_rebuild!`. With O(N) builds you
-can afford a **smaller skin** (e.g., 0.2–0.3) to reduce neighbor count and tighten
-force errors:
-
-```@example 1
-box = CubicBox(15.0)
-R = randn(SVector{3, Float64}, 500); wrap_positions!(R, box)
-cutoff, skin = 2.5, 0.3
-grid = build_cellgrid(R, box; cell_size=cutoff+skin)
-nl = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
-
-# ... advance dynamics updating R ...
-
-if maybe_rebuild!(nl, R, box)
-    rebin!(grid, R, box) # O(N)
-    nl = build_neighborlist_cells(R, box; cutoff=cutoff, skin=skin, grid=grid)
+dt = 0.1
+for _ in 1:100
+    velocity_verlet!(sys, ho_forces, dt)
 end
+
+(pot = ho_forces(sys.positions, return_potential=true)[2])
 ```
 
-### Pitfalls
+## Energy monitoring
 
-\* **Box too small**: ensure `L > 2*(cutoff + skin)` so minimum-image distances are unambiguous.
-\* **Cell size semantics**: the grid uses an **effective** width `L/nx ≥ cutoff+skin`.
-\* **Units**: `R`/`L` must share the same units; `cutoff`/`skin` are in those units.
-\* **Precision**: distance math uses `Float64`. Mixed-precision inputs are converted.
 
-### Performance Tips
+```@example energy
+using Verlet, StaticArrays, LinearAlgebra
 
-- Choose a **skin** large enough that rebuilds are infrequent, but not so large that each particle has too many neighbors.  
-    A good starting point is `skin ≈ 0.3σ`.
-- Ensure the box length `L` satisfies `L > 2*(cutoff + skin)` to avoid ambiguous minimum-image distances.
-- Accumulated forces and energies are stored in `Float64` for stability even if input positions are `Float32`.
-- Rebuilds are **O(N²)**, but are triggered rarely. Per-step force computation with the neighbor list is **O(N)** on average.
+function ho_forces(R; return_potential=false)
+    F = [-r for r in R]
+    U = 0.5 * sum(norm(r)^2 for r in R)
+    return return_potential ? (F, U) : F
+end
 
-### Common Pitfalls
+positions = [@SVector [1.0, 0.0, 0.0]]
+velocities = [@SVector [0.0, 1.0, 0.0]]
+forces = [@SVector [0.0, 0.0, 0.0]]
+masses = [1.0]
+box = CubicBox(10.0)
+types = [1]
+type_names = Dict(1 => :A)
+sys = System(positions, velocities, forces, masses, box, types, type_names)
+dt = 0.05
 
-- Using a **too small skin** can cause missed interactions if particles move across the buffer before a rebuild.
-- Forgetting to call `wrap_positions!` regularly may lead to large apparent displacements across periodic boundaries.
-- The neighbor list includes symmetric neighbors. Forces should only be applied once per pair (the built-in `lj_forces` handles this).
+energies = Float64[]
+for _ in 1:200
+    velocity_verlet!(sys, ho_forces, dt)
+    push!(energies, ho_forces(sys.positions, return_potential=true)[2]) # kinetic_energy removed
+end
 
-### See Also
+(round(minimum(energies), digits=6), round(maximum(energies), digits=6))
+```
 
-- [`build_neighborlist`](@ref) — construct a new list from positions.  
-- [`maybe_rebuild!`](@ref) — keep a list up-to-date based on displacements.  
-- [`wrap_positions!`](@ref) — enforce periodic wrapping of coordinates.  
-- [`lj_forces`](@ref) — compute Lennard–Jones forces with or without a neighbor list.
+## Performance tips
+
+* Keep arrays as `Matrix{Float64}` / `Vector{Float64}` to avoid type instability.
+* Prefer **in-place** force computations in your own code paths; if you must allocate, reuse buffers.
+* Avoid huge `dt`. Start small (e.g., `1e-3` in your time units) and increase cautiously.
+
+See also: \[Numerics & Pitfalls]\(@ref numerics).
+
+With constraints, you can simulate rigid bonds (e.g. water models) and safely
+increase timestep sizes while preserving stability.
+
+## ForceField API for Potentials
+
+The recommended way to handle pair potentials like Lennard-Jones is with the `ForceField` API. This provides a flexible way to combine multiple potentials and uses an efficient neighbor list implementation.
+
+```@example
+using Verlet, StaticArrays
+
+# 1. Set up a system
+box = CubicBox(20.0)
+R = [@SVector randn(3) for _ in 1:100]
+wrap_positions!(R, box)
+sys = System(
+    R,
+    [@SVector(zeros(3)) for _ in R],
+    [@SVector(zeros(3)) for _ in R],
+    ones(length(R)),
+    box,
+    ones(Int, length(R)),
+    Dict(1 => :A)
+)
+
+# 2. Define a Lennard-Jones potential
+lj = LennardJones(
+    PairTable(fill(LJPair(1.0, 1.0, 2.5), (1, 1))),
+    Tuple{T_int,T_int}[],
+    0.5
+)
+
+# 3. Create a ForceField
+ff = ForceField((lj,))
+
+# 4. Build neighbor lists and compute forces
+master_skin = 0.5
+build_all_neighbors!(ff, sys, master_skin)
+compute_all_forces!(sys, ff)
+
+@show sys.forces[1]
+```
+
+### Neighbor List Methods
+
+You can choose the neighbor list algorithm with the `method` keyword in `build_all_neighbors!`:
+- `:cells` (default): Fast `O(N)` cell-based algorithm.
+- `:bruteforce`: Slower `O(N^2)` algorithm for debugging.
+- `:all_pairs`: Includes all pairs, ignoring cutoffs.
+
+```julia
+build_all_neighbors!(ff, sys, master_skin, method=:bruteforce)
+```
+
+- [`build_master_neighborlist`](@ref) — construct a new master neighbor list.
+- [`wrap_positions!`](@ref) — enforce periodic wrapping of coordinates.
 
 ## Further Notes
 

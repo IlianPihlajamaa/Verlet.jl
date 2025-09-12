@@ -1,7 +1,5 @@
 using LinearAlgebra, StaticArrays
 
-include("neighborlist.jl")
+include("neighborlist.jl") # Deprecated, but keep for now.
 include("cellgrid.jl")
-include("neighborlist_cells.jl")
-
-
+include("master_nl.jl")
