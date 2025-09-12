@@ -56,10 +56,10 @@ function _build_master_nl_cells!(entries, R, box, rlist2, grid)
     nextp = g.next
 
     @inbounds for cz in 1:nz, cy in 1:ny, cx in 1:nx
-        c = ((cz - 1) * ny + (cy - 1)) * nx + cx
-        neigh = _neighbors_of_cell(cx, cy, cz, (nx, ny, nz))
-        i = heads[c]
+        c_idx = ((cz - 1) * ny + (cy - 1)) * nx + cx
+        i = heads[c_idx]
         while i != 0
+            # Same cell pairs
             j = nextp[i]
             while j != 0
                 r2 = _squared_distance_min_image(R, i, j, box)
@@ -68,16 +68,18 @@ function _build_master_nl_cells!(entries, R, box, rlist2, grid)
                 end
                 j = nextp[j]
             end
-            for idx in 1:27
-                cc = neigh[idx]
-                if cc > c
-                    j_neighbor = heads[cc]
-                    while j_neighbor != 0
-                        r2 = _squared_distance_min_image(R, i, j_neighbor, box)
+
+            # Neighbor cell pairs (27 neighbors)
+            neigh = _neighbors_of_cell(cx, cy, cz, (nx,ny,nz))
+            for cc_idx in neigh
+                if c_idx < cc_idx
+                    j = heads[cc_idx]
+                    while j != 0
+                        r2 = _squared_distance_min_image(R, i, j, box)
                         if r2 <= rlist2
-                            push!(entries, MasterNeighborEntry(min(i,j_neighbor), max(i,j_neighbor), r2))
+                            push!(entries, MasterNeighborEntry(min(i,j), max(i,j), r2))
                         end
-                        j_neighbor = nextp[j_neighbor]
+                        j = nextp[j]
                     end
                 end
             end
@@ -88,41 +90,39 @@ end
 
 
 """
-    build_master_neighborlist(R, box; r_verlet, skin, method=:cells, grid=nothing) -> MasterNeighborList
+    build_master_neighborlist!(master_nl, R, box; r_verlet, skin, method=:cells, grid=nothing)
 
-Construct a master neighbor list.
+Update a master neighbor list in-place.
 
 The `method` keyword argument can be one of:
 - `:cells`: Use an O(N) cell-linked grid build (default).
 - `:bruteforce`: Use an O(N^2) brute-force build.
 - `:all_pairs`: Include all pairs, ignoring the cutoff.
 """
-function build_master_neighborlist(R::AbstractVector, box::CubicBox;
+function build_master_neighborlist!(master_nl::MasterNeighborList, R::AbstractVector, box::CubicBox;
     r_verlet::Real=0.0,
-    skin::Real=0.0,
     method::Symbol=:cells,
     grid::Union{Nothing,CellGrid}=nothing)
 
     @assert length(R[1]) == 3 "d=3 only"
-    entries = MasterNeighborEntry[]
+    resize!(master_nl.entries, 0)
 
     if method == :cells
-        rlist2 = (r_verlet + skin)^2
-        _build_master_nl_cells!(entries, R, box, rlist2, grid)
+        rlist2 = (r_verlet + master_nl.skin)^2
+        _build_master_nl_cells!(master_nl.entries, R, box, rlist2, grid)
     elseif method == :bruteforce
-        rlist2 = (r_verlet + skin)^2
-        _build_master_nl_bruteforce!(entries, R, box, rlist2)
+        rlist2 = (r_verlet + master_nl.skin)^2
+        _build_master_nl_bruteforce!(master_nl.entries, R, box, rlist2)
     elseif method == :all_pairs
-        _build_master_nl_allpairs!(entries, R, box)
+        _build_master_nl_allpairs!(master_nl.entries, R, box)
     else
         error("Unknown neighborlist method: $method")
     end
 
-    # The cell-based method can introduce duplicates. Remove them.
     if method == :cells
-        sort!(entries, by = x -> (x.i, x.j))
-        unique!(entries)
+        sort!(master_nl.entries, by = x -> (x.i, x.j))
+        unique!(master_nl.entries)
     end
 
-    return MasterNeighborList(T_Float(skin), entries)
+    return master_nl
 end

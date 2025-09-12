@@ -28,7 +28,7 @@ export T_Float, T_int
 
 export ForceField, build_all_neighbors!, compute_all_forces!
 export LennardJones, Coulomb, LJPair, CoulPair, PairTable, MasterNeighborList, PotentialNeighborList
-export build_master_neighborlist
+export build_master_neighborlist!
 
 export build_cellgrid, rebin!
 

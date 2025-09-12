@@ -71,8 +71,14 @@ end
 
 The master neighbor list, containing all candidate pairs within the largest cutoff radius.
 """
-struct MasterNeighborList{T<:Number}
+mutable struct MasterNeighborList{T<:Number}
     skin::T
     entries::Vector{MasterNeighborEntry}
     # Other fields like reference positions could be added here if needed
+end
+
+function MasterNeighborList(skin::T; sizehint=1000) where T
+    entries = MasterNeighborEntry[]
+    sizehint!(entries, sizehint)
+    return MasterNeighborList(skin, entries)
 end

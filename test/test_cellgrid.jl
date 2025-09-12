@@ -41,7 +41,8 @@ using Random
 
         cutoff, skin = 2.2, 0.5
         r_verlet = cutoff
-        master_nl = build_master_neighborlist(R, box; r_verlet=r_verlet, skin=skin, method=:cells)
+        master_nl = MasterNeighborList(skin)
+        build_master_neighborlist!(master_nl, R, box; r_verlet=r_verlet, method=:cells)
 
         rlist2 = (cutoff + skin)^2
         ref_pairs = Tuple{Int,Int}[]

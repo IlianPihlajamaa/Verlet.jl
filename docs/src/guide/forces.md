@@ -40,7 +40,8 @@ ff = ForceField((lj,))
 
 # 4. Build neighbor lists and compute forces
 master_skin = 0.5
-master_nl = build_all_neighbors!(ff, sys, master_skin)
+master_nl = MasterNeighborList(master_skin)
+build_all_neighbors!(master_nl, ff, sys)
 compute_all_forces!(sys, ff)
 
 # The forces are now stored in sys.forces
@@ -68,7 +69,8 @@ The `build_all_neighbors!` function uses a master neighbor list to accelerate fo
 Here's how to use it:
 
 ```julia
-# build_all_neighbors!(ff, sys, master_skin, method=:bruteforce)
+# master_nl = MasterNeighborList(master_skin)
+# build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)
 ```
 
 ## Custom Forces
