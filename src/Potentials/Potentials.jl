@@ -1,9 +1,7 @@
-module Potentials
 using LinearAlgebra, StaticArrays
-using ..Core
-export lj_forces
+using StructArrays
 
+include("potentials.jl")
 include("lj.jl")
+include("coulomb.jl")
 include("bonds.jl")
-
-end
