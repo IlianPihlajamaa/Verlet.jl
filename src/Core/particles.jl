@@ -29,6 +29,7 @@ struct System{T<:AbstractFloat,IT<:Integer,Dims}
     types::Vector{IT}
     type_names::Dict{IT,Symbol}
     natoms::IT
+    specific_potentials::Tuple
 
     function System(
         positions::Vector{SVector{Dims,T}},
@@ -37,14 +38,15 @@ struct System{T<:AbstractFloat,IT<:Integer,Dims}
         masses::Vector{T},
         box::AbstractBox{T},
         types::Vector{IT},
-        type_names::Dict{IT,Symbol},
+        type_names::Dict{IT,Symbol};
+        specific_potentials::Tuple=()
     ) where {T<:AbstractFloat,IT<:Integer,Dims}
         natoms = length(positions)
         @assert length(velocities) == natoms "velocities must be same size as positions"
         @assert length(forces) == natoms "forces must be same size as positions"
         @assert length(masses) == natoms "masses must be same size as positions"
         @assert length(types) == natoms "types must be same size as positions"
-        new{T,IT,Dims}(positions, velocities, forces, masses, box, types, type_names, natoms)
+        new{T,IT,Dims}(positions, velocities, forces, masses, box, types, type_names, natoms, specific_potentials)
     end
 end
 

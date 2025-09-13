@@ -19,3 +19,5 @@ include("test_thermostats.jl")
 include("test_constraints.jl")
 	include("test_cbaoab.jl")
 
+# Bonded potential tests
+include("test_bonded.jl")
