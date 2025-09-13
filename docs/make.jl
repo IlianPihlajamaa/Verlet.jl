@@ -13,6 +13,7 @@ makedocs(
         "Guide" => Any[
             "Constrained Dynamics" => "guide/constraints.md",
             "Forces & Potentials" => "guide/forces.md",
+            "Bonded Potentials" => "guide/bonded.md",
             "Numerical Notes" => "guide/numerics.md",
         ],
         "API" => "api.md",
