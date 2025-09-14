@@ -1,23 +1,37 @@
+module VerletTests
+
 using Test
 using Verlet
 
 using LinearAlgebra, StaticArrays
 
 # Core unit tests
-include("test_system.jl")
-include("test_core.jl")
+@testset "Core" begin
+    include("test_system.jl")
+    include("test_core.jl")
+end
 
 # Neighborlist and cellgrid acceptance tests
-# include("test_neighborlist.jl") # Old API
-include("test_cellgrid.jl")
-include("test_forcefields.jl")
+@testset "Neighbors" begin
+    # include("test_neighborlist.jl") # Old API
+    include("test_cellgrid.jl")
+    include("test_forcefields.jl")
+end
 
 # Thermostat / NVT tests
-include("test_thermostats.jl")
+@testset "Thermostats" begin
+    include("test_thermostats.jl")
+end
 
 # Constraints tests
-include("test_constraints.jl")
+@testset "Constraints" begin
+    include("test_constraints.jl")
 	include("test_cbaoab.jl")
+end
 
 # Bonded potential tests
-include("test_bonded.jl")
+@testset "Potentials" begin
+    include("test_bonded.jl")
+end
+
+end
