@@ -6,6 +6,8 @@
 #
 # The script activates the local bench environment (BenchmarkTools).
 
+import Pkg; Pkg.activate(@__DIR__)
+
 using BenchmarkTools
 using Random
 using LinearAlgebra, StaticArrays
@@ -20,12 +22,13 @@ function parse_args(args::Vector{String})
         "N" => [128, 256, 512, 1024, 2048, 4096, 8192],
         "D" => 3,
         "rho" => 1.0,
-        "rcut" => 2.5,
+        "rcut" => 1.25,
         "skin" => 0.4,
         "samples" => 10,
         "seed" => 42,
         "potential" => false,      # set true to include potential accumulation
-        "builder" => "both",       # "all_pairs" | "cells" | "both"
+        "builder" => "all",       # "all_pairs" | "cells" | "brute_force" | "all"
+        "storage" => "both",   # "entries" | "csr" | "both"
     )
     for arg in args
         if occursin("=", arg)
@@ -48,6 +51,8 @@ function parse_args(args::Vector{String})
                 opts["potential"] = lowercase(v) in ("1","true","yes","y")
             elseif k == "builder"
                 opts["builder"] = lowercase(v)
+            elseif k == "storage"
+                opts["storage"] = lowercase(v)
             end
         end
     end
@@ -99,7 +104,7 @@ function bench_case(sys, ff, master_nl; method::Symbol, samples::Int)
     force_trial = @benchmark Verlet.Core.compute_all_forces!($sys, $ff) samples=samples evals=1
 
     lj = ff.layers[1]
-    avg_deg = length(lj.neighbors) / sys.natoms
+    avg_deg = length(lj.neighborlist.neighbors) / sys.natoms
 
     return (; build_trial, force_trial, avg_deg)
 end
@@ -108,7 +113,7 @@ end
 # Run
 # ----------------------------
 println("Benchmarking Neighbor Lists")
-println("Params: D=$(OPTS["D"]), rho=$(OPTS["rho"]), rcut=$(OPTS["rcut"]), skin=$(OPTS["skin"]), samples=$(OPTS["samples"]), potential=$(OPTS["potential"]), builder=$(OPTS["builder"])\n")
+println("Params: D=$(OPTS["D"]), rho=$(OPTS["rho"]), rcut=$(OPTS["rcut"]), skin=$(OPTS["skin"]), samples=$(OPTS["samples"]), potential=$(OPTS["potential"]), builder=$(OPTS["builder"]), storage=$(OPTS["storage"])\n")
 
 for N in OPTS["N"]
     D   = OPTS["D"]
@@ -117,38 +122,62 @@ for N in OPTS["N"]
 
     sys = setup_system(N, D, L)
 
-    # Setup ForceField and MasterNeighborList
+    # Setup ForceField
     ϵ, σ, rcut, skin = 1.0, 1.0, OPTS["rcut"], OPTS["skin"]
     lj_pair = LJPair(ϵ, σ, rcut)
     params = PairTable(fill(lj_pair, (1, 1)))
     exclusions = Tuple{Int,Int}[]
     lj = LennardJones(params, exclusions, skin)
     ff = Verlet.Neighbors.ForceField((lj,))
-    master_nl = MasterNeighborList(skin)
-
-    if OPTS["builder"] in ("all_pairs", "both")
-        res = bench_case(sys, ff, master_nl; method=:all_pairs, samples=OPTS["samples"])
-        t_build = ns(res.build_trial)
-        t_force = ns(res.force_trial)
-
-        println("=== N=$N (all_pairs) ===")
-        println(rpad("avg_deg", 16), rpad("build", 14), rpad("force(NL)", 14))
-        println(rpad(@sprintf("%.2f", res.avg_deg), 16),
-                rpad(fmt_ns(t_build), 14),
-                rpad(fmt_ns(t_force), 14))
-        println()
+    storages = OPTS["storage"] == "both" ? ("entries", "csr") : (OPTS["storage"],)
+    nl =  Verlet.Neighbors.MasterNeighborCSRList(skin; N=sys.natoms)
+    Verlet.Neighbors.build_all_neighbors!(nl, ff, sys, method=:cells)
+    @profview for i = 1:100
+        Verlet.Neighbors.build_all_neighbors!(nl, ff, sys, method=:cells)
+        Verlet.Core.compute_all_forces!(sys, ff)
     end
 
-    if OPTS["builder"] in ("cells", "both")
-        res = bench_case(sys, ff, master_nl; method=:cells, samples=OPTS["samples"])
-        t_build = ns(res.build_trial)
-        t_force = ns(res.force_trial)
 
-        println("=== N=$N (cells) ===")
-        println(rpad("avg_deg", 16), rpad("build", 14), rpad("force(NL)", 14))
-        println(rpad(@sprintf("%.2f", res.avg_deg), 16),
-                rpad(fmt_ns(t_build), 14),
-                rpad(fmt_ns(t_force), 14))
-        println()
+    for storage in storages
+        master_nl = storage == "csr" ? Verlet.Neighbors.MasterNeighborCSRList(skin; N=sys.natoms) : Verlet.Neighbors.MasterNeighborList(skin)
+
+        if OPTS["builder"] in ("all_pairs", "all")
+            res = bench_case(sys, ff, master_nl; method=:all_pairs, samples=OPTS["samples"])
+            t_build = ns(res.build_trial)
+            t_force = ns(res.force_trial)
+
+            println("=== N=$N (all_pairs, $storage) ===")
+            println(rpad("avg_deg", 16), rpad("build", 14), rpad("force(NL)", 14))
+            println(rpad(@sprintf("%.2f", res.avg_deg), 16),
+                    rpad(fmt_ns(t_build), 14),
+                    rpad(fmt_ns(t_force), 14))
+            println()
+        end
+
+        if OPTS["builder"] in ("cells", "all")
+            res = bench_case(sys, ff, master_nl; method=:cells, samples=OPTS["samples"])
+            t_build = ns(res.build_trial)
+            t_force = ns(res.force_trial)
+
+            println("=== N=$N (cells, $storage) ===")
+            println(rpad("avg_deg", 16), rpad("build", 14), rpad("force(NL)", 14))
+            println(rpad(@sprintf("%.2f", res.avg_deg), 16),
+                    rpad(fmt_ns(t_build), 14),
+                    rpad(fmt_ns(t_force), 14))
+            println()
+        end
+
+        if OPTS["builder"] in ("brute_force", "all")
+            res = bench_case(sys, ff, master_nl; method=:bruteforce, samples=OPTS["samples"])
+            t_build = ns(res.build_trial)
+            t_force = ns(res.force_trial)
+
+            println("=== N=$N (bruteforce, $storage) ===")
+            println(rpad("avg_deg", 16), rpad("build", 14), rpad("force(NL)", 14))
+            println(rpad(@sprintf("%.2f", res.avg_deg), 16),
+                    rpad(fmt_ns(t_build), 14),
+                    rpad(fmt_ns(t_force), 14))
+            println()
+        end
     end
 end

@@ -38,7 +38,7 @@ end
         Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=method)
 
         @test master_nl isa MasterNeighborList
-        @test lj.neighbors isa PotentialNeighborList
+        @test lj.neighborlist isa PotentialNeighborList
 
         Verlet.Core.compute_all_forces!(sys, ff)
 

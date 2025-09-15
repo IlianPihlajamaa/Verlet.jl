@@ -3,19 +3,19 @@ import ..Core: compute_forces!
 mutable struct LennardJones{IntT<:Integer, T<:AbstractPotentialPair, T_Float} <: AbstractPairPotential
     params::PairTable{T}
     exclusions::Vector{Tuple{IntT, IntT}}
-    neighbors::PotentialNeighborList{T}
+    neighborlist::PotentialNeighborList{T, IntT}
     skin::T_Float
 end
 
 function LennardJones(params::PairTable{T}, exclusions, skin) where T
-    neighbors = StructArray{Neighbors.NeighborPair{T, T_Int}}(undef, 0)
-    return LennardJones(params, exclusions, neighbors, skin)
+    neighborlist = PotentialNeighborList(eltype(params.table))
+    return LennardJones(params, exclusions, neighborlist, skin)
 end
 
 
 
 function compute_forces!(pot::LennardJones, sys::System)
-    for pair_info in pot.neighbors
+    for pair_info in pot.neighborlist.neighbors
         i = pair_info.i
         j = pair_info.j
         p = pair_info.pair

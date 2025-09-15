@@ -2,17 +2,17 @@ import ..Core: compute_forces!
 mutable struct Coulomb{IntT<:Integer, T<:AbstractPotentialPair, T_Float} <: AbstractPairPotential
     params::PairTable{T}
     exclusions::Vector{Tuple{IntT, IntT}}
-    neighbors::PotentialNeighborList{T}
+    neighborlist::PotentialNeighborList{T}
     skin::T_Float
 end
 
 function Coulomb(params::PairTable{T}, exclusions, skin) where T
-    neighbors = StructArray{Neighbors.NeighborPair{T, T_Int}}(undef, 0)
-    return Coulomb(params, exclusions, neighbors, skin)
+    neighborlist = PotentialNeighborList(eltype(params.table))
+    return Coulomb(params, exclusions, neighborlist, skin)
 end
 
 function compute_forces!(pot::Coulomb, sys::System)
-    for pair_info in pot.neighbors
+    for pair_info in pot.neighborlist.neighbors
         i = pair_info.i
         j = pair_info.j
         p = pair_info.pair

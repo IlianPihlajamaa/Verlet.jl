@@ -18,6 +18,16 @@ makedocs(
             "Bonded Potentials" => "guide/bonded.md",
             "Numerical Notes" => "guide/numerics.md",
         ],
+        "Specs" => Any[
+            "Overview" => "specs/Spec_Module_Index.md",
+            "Top-level (Verlet)" => "specs/Spec_Verlet.md",
+            "Core" => "specs/Spec_Core.md",
+            "Neighbors" => "specs/Spec_Neighbors.md",
+            "Potentials" => "specs/Spec_Potentials.md",
+            "Constraints" => "specs/Spec_Constraints.md",
+            "Thermostats" => "specs/Spec_Thermostats.md",
+            "Electrostatics" => "specs/Spec_Electrostatics.md",
+        ],
         "API" => "api.md",
     ],
 )

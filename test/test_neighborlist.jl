@@ -51,7 +51,7 @@ end
         F_nl = sys.forces
 
         U_nl = 0.0
-        for pair_info in lj.neighbors
+        for pair_info in lj.neighborlist.neighbors
             r2 = Verlet.Neighbors._squared_distance_min_image(sys.positions, pair_info.i, pair_info.j, sys.box)
             if r2 < rcut^2
                 inv_r2 = 1 / r2
