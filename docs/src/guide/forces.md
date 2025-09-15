@@ -40,7 +40,7 @@ ff = Verlet.Neighbors.ForceField((lj,))
 
 # 4. Build neighbor lists and compute forces
 master_skin = 0.5
-master_nl = Verlet.Core.MasterNeighborList(master_skin)
+master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
 Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys)
 Verlet.Neighbors.compute_all_forces!(sys, ff)
 

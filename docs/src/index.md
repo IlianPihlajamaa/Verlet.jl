@@ -42,7 +42,7 @@ end
 
 # 4. Run the simulation
 dt = 0.1
-master_nl = Verlet.Core.MasterNeighborList(0.5)
+master_nl = Verlet.Neighbors.MasterNeighborList(0.5)
 # Wrap the force function to match the integrator's signature
 force_wrapper(R) = compute_forces_for_integrator(R, sys, ff, master_nl)
 Verlet.Core.velocity_verlet!(sys, force_wrapper, dt)
@@ -161,7 +161,7 @@ ff = Verlet.Neighbors.ForceField((lj,))
 
 # 4. Build neighbor lists and compute forces
 master_skin = 0.5
-master_nl = Verlet.Core.MasterNeighborList(master_skin)
+master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
 Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys)
 Verlet.Neighbors.compute_all_forces!(sys, ff)
 
@@ -176,8 +176,8 @@ You can choose the neighbor list algorithm with the `method` keyword in `build_a
 - `:all_pairs`: Includes all pairs, ignoring cutoffs.
 
 ```julia
-master_nl = MasterNeighborList(master_skin)
-build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)
+master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
+Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)
 ```
 
 - [`build_master_neighborlist!`](@ref) — construct a new master neighbor list.
