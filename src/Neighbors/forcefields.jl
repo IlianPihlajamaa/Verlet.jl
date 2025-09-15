@@ -23,6 +23,7 @@ function build_neighbors_from_master!(pot::AbstractPairPotential, sys::System, m
 end
 
 
+
 function build_neighbors_from_master!(pot::AbstractPairPotential, sys::System, masterNL::MasterNeighborCSRList)
     PairType = eltype(pot.params.table)
 
@@ -83,4 +84,44 @@ function build_all_neighbors!(master_nl::MasterNeighborCSRList, ff::ForceField, 
 
     # 2. Build per-potential NLs
     map(pot -> build_neighbors_from_master!(pot, sys, master_nl), layers)
+end
+
+
+function build_all_neighbors!(master_nl::MyNeighborList, ff::ForceField, sys; method::Symbol=:cells)
+    # 1. Compute master NL radius
+    layers = ff.layers
+
+    rc_max = maximum(
+        maximum([p.rc for p in pot.params.table]) + pot.skin
+        for pot in layers
+    )
+
+    rebuild!(master_nl, (r=sys.positions, box=sys.box), sys.box)
+
+
+    # 2. Build per-potential NLs
+    map(pot -> build_neighbors_from_master!(pot, sys, master_nl), layers)
+end
+
+function build_neighbors_from_master!(pot::AbstractPairPotential, sys::System, masterNL::MyNeighborList)
+    PairType = eltype(pot.params.table)
+
+    neighbors = pot.neighborlist.neighbors
+    empty!(neighbors)
+
+    types = sys.types
+    skin = pot.skin
+    for entry in masterNL.pairs
+        i, j = entry[1], entry[2]
+        ri = sys.positions[i]
+        rj = sys.positions[j]
+        Δ = ri - rj
+        Δ = minimum_image(Δ, sys.box)
+        r2 = dot(Δ, Δ)
+        p = pot.params.table[types[i], types[j]]
+        rc = p.rc
+        if !is_excluded(pot, i, j) && r2 < (rc + skin)^2
+            push!(neighbors, NeighborPair{PairType, Int}(i, j, p))
+        end
+    end
 end
