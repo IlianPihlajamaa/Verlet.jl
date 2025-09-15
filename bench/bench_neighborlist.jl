@@ -115,6 +115,10 @@ end
 println("Benchmarking Neighbor Lists")
 println("Params: D=$(OPTS["D"]), rho=$(OPTS["rho"]), rcut=$(OPTS["rcut"]), skin=$(OPTS["skin"]), samples=$(OPTS["samples"]), potential=$(OPTS["potential"]), builder=$(OPTS["builder"]), storage=$(OPTS["storage"])\n")
 
+
+
+
+
 for N in OPTS["N"]
     D   = OPTS["D"]
     rho = OPTS["rho"]
@@ -130,22 +134,19 @@ for N in OPTS["N"]
     lj = LennardJones(params, exclusions, skin)
     ff = Verlet.Neighbors.ForceField((lj,))
     storages = OPTS["storage"] in ("both", "all") ? ("entries", "csr", "verlet") : (OPTS["storage"],)
-    nl =  Verlet.Neighbors.MasterNeighborVerletList(skin; N=sys.natoms)
-    Verlet.Neighbors.build_all_neighbors!(nl, ff, sys, method=:cells)
-    @profview for i = 1:100
-        Verlet.Neighbors.build_all_neighbors!(nl, ff, sys, method=:cells)
-        Verlet.Core.compute_all_forces!(sys, ff)
-    end
 
-
+    ps = (r=sys.positions, velocities=sys.velocities, forces=sys.forces)
     for storage in storages
         master_nl = storage == "csr" ?
             Verlet.Neighbors.MasterNeighborCSRList(skin; N=sys.natoms) :
             storage == "entries" ?
                 Verlet.Neighbors.MasterNeighborList(skin) :
                 storage == "verlet" ?
-                    Verlet.Neighbors.MasterNeighborVerletList(skin; N=sys.natoms) :
+                    Verlet.Neighbors.MyNeighborList(sys; cutoff=rcut, skin=skin) :
                     error("Unknown storage=$storage")
+
+        Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys; method=:cells)
+        Verlet.Core.compute_all_forces!(sys, ff)  # warmup
 
         if OPTS["builder"] in ("all_pairs", "all")
             res = bench_case(sys, ff, master_nl; method=:all_pairs, samples=OPTS["samples"])

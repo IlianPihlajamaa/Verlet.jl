@@ -18,12 +18,12 @@ A flexible and type-stable container for particle-based simulations.
 - `type_names::Dict{IT, Symbol}`: Mapping from type identifiers to descriptive names (e.g., `1 => :H`).
 - `natoms::IT`: Total number of atoms.
 """
-struct System{T<:AbstractFloat,IT<:Integer,Dims}
+struct System{T<:AbstractFloat,IT<:Integer,Dims, BOX<:AbstractBox{T}}
     positions::Vector{SVector{Dims,T}}
     velocities::Vector{SVector{Dims,T}}
     forces::Vector{SVector{Dims,T}}
     masses::Vector{T}
-    box::AbstractBox{T}
+    box::BOX
     types::Vector{IT}
     type_names::Dict{IT,Symbol}
     natoms::IT
@@ -44,7 +44,7 @@ struct System{T<:AbstractFloat,IT<:Integer,Dims}
         @assert length(forces) == natoms "forces must be same size as positions"
         @assert length(masses) == natoms "masses must be same size as positions"
         @assert length(types) == natoms "types must be same size as positions"
-        new{T,IT,Dims}(positions, velocities, forces, masses, box, types, type_names, natoms, specific_potentials)
+        new{T,IT,Dims, typeof(box)}(positions, velocities, forces, masses, box, types, type_names, natoms, specific_potentials)
     end
 end
 

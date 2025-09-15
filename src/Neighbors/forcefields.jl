@@ -96,7 +96,7 @@ function build_all_neighbors!(master_nl::MyNeighborList, ff::ForceField, sys; me
         for pot in layers
     )
 
-    rebuild!(master_nl, (r=sys.positions, box=sys.box), sys.box)
+    rebuild!(master_nl, sys, sys.box)
 
 
     # 2. Build per-potential NLs
