@@ -1,0 +1,6 @@
+abstract type AbstractPotentialPair end
+abstract type AbstractPairPotential end
+abstract type AbstractBondPotential end
+abstract type AbstractAnglePotential end
+abstract type AbstractDihedralPotential end
+abstract type AbstractImproperPotential end

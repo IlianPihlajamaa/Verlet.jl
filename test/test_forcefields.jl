@@ -29,18 +29,18 @@ end
     exclusions = Tuple{T_int,T_int}[]
     lj = LennardJones(params, exclusions, 0.5)
 
-    ff = ForceField((lj,))
+    ff = Verlet.Neighbors.ForceField((lj,))
 
     master_skin = 0.5
     master_nl = MasterNeighborList(master_skin)
 
     for method in [:cells, :bruteforce, :all_pairs]
-        build_all_neighbors!(master_nl, ff, sys, method=method)
+        Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=method)
 
         @test master_nl isa MasterNeighborList
         @test lj.neighbors isa PotentialNeighborList
 
-        compute_all_forces!(sys, ff)
+        Verlet.Neighbors.compute_all_forces!(sys, ff)
 
         F_ref = zeros(SVector{3,T_Float}, sys.natoms)
         for i in 1:sys.natoms-1
@@ -89,14 +89,14 @@ end
     exclusions = Tuple{T_int,T_int}[]
     coul = Coulomb(params, exclusions, 0.5)
 
-    ff = ForceField((coul,))
+    ff = Verlet.Neighbors.ForceField((coul,))
 
     master_skin = 0.5
     master_nl = MasterNeighborList(master_skin)
 
     for method in [:cells, :bruteforce, :all_pairs]
-        build_all_neighbors!(master_nl, ff, sys, method=method)
-        compute_all_forces!(sys, ff)
+        Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=method)
+        Verlet.Neighbors.compute_all_forces!(sys, ff)
 
         F_ref = zeros(SVector{3,T_Float}, sys.natoms)
         for i in 1:sys.natoms-1

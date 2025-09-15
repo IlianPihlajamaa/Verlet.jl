@@ -83,11 +83,11 @@ const Dims = 3
         types = [1]
         type_names = Dict(1 => :A)
         sys = System(positions, velocities, forces, masses, box, types, type_names)
-        @test isapprox(potential_energy(sys, f_kw), 0.5; atol=1e-12)
+        @test isapprox(Verlet.Core.potential_energy(sys, f_kw), 0.5; atol=1e-12)
 
         # A force that does NOT provide potential should error
         f_plain(r) = map(x -> -x, r)
-        @test_throws ErrorException potential_energy(sys, f_plain)
+        @test_throws ErrorException Verlet.Core.potential_energy(sys, f_plain)
     end
 
     @testset "CubicBox + minimum_image!" begin

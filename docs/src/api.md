@@ -2,7 +2,11 @@
 
 ```@index
 Modules = [
-    Verlet,
+    Verlet.Core,
+    Verlet.Neighbors,
+    Verlet.Potentials,
+    Verlet.Constraints,
+    Verlet.Thermostats
 ]
 Order = [:function, :type]
 ```
@@ -10,7 +14,11 @@ Order = [:function, :type]
 
 ```@autodocs 
 Modules = [
-    Verlet,
+    Verlet.Core,
+    Verlet.Neighbors,
+    Verlet.Potentials,
+    Verlet.Constraints,
+    Verlet.Thermostats
 ]
 Order = [:module, :type, :function, :constant, :macro]
 ```

@@ -1,17 +1,16 @@
+using ..Core
 using StructArrays
-import ..Potentials
-import ..Core
 
 struct ForceField{ForcesTuple}
     layers::ForcesTuple
 end
 
-function is_excluded(pot::AbstractPairPotential, i::Integer, j::Integer)
+function is_excluded(pot::Potentials.AbstractPairPotential, i::Integer, j::Integer)
     # This is a placeholder. A real implementation would be more efficient.
     return (i, j) in pot.exclusions || (j, i) in pot.exclusions
 end
 
-function build_neighbors_from_master!(pot::AbstractPairPotential, sys::System, masterNL::MasterNeighborList)
+function build_neighbors_from_master!(pot::Potentials.AbstractPairPotential, sys::System, masterNL::MasterNeighborList)
     PairType = eltype(pot.params.table)
 
     neighbors = pot.neighbors
@@ -45,8 +44,6 @@ function build_all_neighbors!(master_nl::MasterNeighborList, ff::ForceField, sys
     end
 end
 
-using ..Core: Bond, Angle, Dihedral
-
 function compute_all_forces!(sys::System, ff::ForceField)
     # Reset forces before calculation
     fill!(sys.forces, zero(eltype(sys.forces)))
@@ -58,8 +55,6 @@ function compute_all_forces!(sys::System, ff::ForceField)
 
     # Specific bonded forces
     for interaction in sys.specific_potentials
-        if interaction isa Bond || interaction isa Angle || interaction isa Dihedral
-            Core.compute_forces!(interaction, sys)
-        end
+        Core.compute_forces!(interaction, sys)
     end
 end

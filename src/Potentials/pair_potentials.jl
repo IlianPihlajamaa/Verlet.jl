@@ -1,3 +1,6 @@
+using ..Core
+using StructArrays
+
 """
     LJPair{T<:Number}
 Parameters for a Lennard-Jones interaction between two particle types.
