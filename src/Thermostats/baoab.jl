@@ -1,5 +1,3 @@
-using Random
-
 """
     degrees_of_freedom(sys; constraints=nothing, remove_com=false) -> Int
 

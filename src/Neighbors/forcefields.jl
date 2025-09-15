@@ -1,7 +1,5 @@
 
-struct ForceField{ForcesTuple}
-    layers::ForcesTuple
-end
+
 
 function is_excluded(pot::AbstractPairPotential, i::Integer, j::Integer)
     # This is a placeholder. A real implementation would be more efficient.
@@ -42,17 +40,4 @@ function build_all_neighbors!(master_nl::MasterNeighborList, ff::ForceField, sys
     end
 end
 
-function compute_all_forces!(sys::System, ff::ForceField)
-    # Reset forces before calculation
-    fill!(sys.forces, zero(eltype(sys.forces)))
 
-    # Pairwise forces from the force field layers
-    for pot in ff.layers
-        compute_forces!(pot, sys)
-    end
-
-    # Specific bonded forces
-    for interaction in sys.specific_potentials
-        compute_forces!(interaction, sys)
-    end
-end

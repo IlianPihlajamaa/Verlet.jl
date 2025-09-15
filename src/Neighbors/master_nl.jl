@@ -1,5 +1,3 @@
-using LinearAlgebra, StaticArrays
-
 @inline function _squared_distance_min_image(R::AbstractVector, i::T_Int, j::T_Int, box::CubicBox)
     dr = R[i] - R[j]
     dr = minimum_image(dr, box)

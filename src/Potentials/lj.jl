@@ -1,8 +1,6 @@
-using LinearAlgebra, StaticArrays
+import ..Core: compute_forces!
 
-
-
-mutable struct LennardJones{IntT<:Integer, T<:Core.AbstractPotentialPair, T_Float} <: Core.AbstractPairPotential
+mutable struct LennardJones{IntT<:Integer, T<:AbstractPotentialPair, T_Float} <: AbstractPairPotential
     params::PairTable{T}
     exclusions::Vector{Tuple{IntT, IntT}}
     neighbors::Neighbors.PotentialNeighborList{T}
@@ -10,18 +8,20 @@ mutable struct LennardJones{IntT<:Integer, T<:Core.AbstractPotentialPair, T_Floa
 end
 
 function LennardJones(params::PairTable{T}, exclusions, skin) where T
-    neighbors = StructArray{Neighbors.NeighborPair{T, Core.T_Int}}(undef, 0)
+    neighbors = StructArray{Neighbors.NeighborPair{T, T_Int}}(undef, 0)
     return LennardJones(params, exclusions, neighbors, skin)
 end
 
-function Core.compute_forces!(pot::LennardJones, sys::Core.System)
+
+
+function compute_forces!(pot::LennardJones, sys::System)
     for pair_info in pot.neighbors
         i = pair_info.i
         j = pair_info.j
         p = pair_info.pair
 
         Δ = sys.positions[i] - sys.positions[j]
-        Δ = Core.minimum_image(Δ, sys.box)
+        Δ = minimum_image(Δ, sys.box)
         r2 = dot(Δ, Δ)
 
         if r2 < p.rc^2

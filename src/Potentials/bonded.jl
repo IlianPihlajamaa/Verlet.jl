@@ -1,22 +1,21 @@
-using LinearAlgebra, StaticArrays
-
 # Bonded potentials
-export AbstractBondPotential, HarmonicBond, Bond
-export AbstractAnglePotential, HarmonicAngle, Angle
-export AbstractDihedralPotential, PeriodicDihedral, Dihedral
+export HarmonicBond, Bond
+export HarmonicAngle, Angle
+export PeriodicDihedral, Dihedral
+import ..Core: compute_forces!
 
 # Concrete implementations of bonded potentials
-struct HarmonicBond{T} <: Core.AbstractBondPotential
+struct HarmonicBond{T} <: AbstractBondPotential
     k::T    # Spring constant
     r0::T   # Equilibrium distance
 end
 
-struct HarmonicAngle{T} <: Core.AbstractAnglePotential
+struct HarmonicAngle{T} <: AbstractAnglePotential
     k::T    # Spring constant
     θ0::T   # Equilibrium angle
 end
 
-struct PeriodicDihedral{T} <: Core.AbstractDihedralPotential
+struct PeriodicDihedral{T} <: AbstractDihedralPotential
     k::T    # Barrier height
     n::Int  # Periodicity
     ϕ0::T   # Phase offset
@@ -24,20 +23,20 @@ end
 
 # Structs to hold the particle indices for each interaction
 # These are what will be stored in the System's specific_potentials list
-struct Bond{T<:Core.AbstractBondPotential}
+struct Bond{T<:AbstractBondPotential}
     i::Int
     j::Int
     potential::T
 end
 
-struct Angle{T<:Core.AbstractAnglePotential}
+struct Angle{T<:AbstractAnglePotential}
     i::Int
     j::Int
     k::Int
     potential::T
 end
 
-struct Dihedral{T<: Core.AbstractDihedralPotential}
+struct Dihedral{T<: AbstractDihedralPotential}
     i::Int
     j::Int
     k::Int
@@ -53,7 +52,7 @@ function potential_energy(bond::HarmonicBond, r)
     return 0.5 * bond.k * dr^2
 end
 
-function Core.compute_forces!(bond::Bond, system)
+function compute_forces!(bond::Bond, system)
     vec_ij = system.positions[bond.j] - system.positions[bond.i]
     r = norm(vec_ij)
 
@@ -71,7 +70,7 @@ function potential_energy(angle::HarmonicAngle, θ)
     return 0.5 * angle.k * dθ^2
 end
 
-function Core.compute_forces!(angle::Angle, system)
+function compute_forces!(angle::Angle, system)
     r_ji = system.positions[angle.i] - system.positions[angle.j]
     r_jk = system.positions[angle.k] - system.positions[angle.j]
 
@@ -102,7 +101,7 @@ function potential_energy(dihedral::PeriodicDihedral, ϕ)
     return dihedral.k * (1 + cos(dihedral.n * ϕ - dihedral.ϕ0))
 end
 
-function Core.compute_forces!(dihedral::Dihedral, system)
+function compute_forces!(dihedral::Dihedral, system)
     r_ij = system.positions[dihedral.j] - system.positions[dihedral.i]
     r_jk = system.positions[dihedral.k] - system.positions[dihedral.j]
     r_kl = system.positions[dihedral.l] - system.positions[dihedral.k]

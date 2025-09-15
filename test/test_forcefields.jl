@@ -40,7 +40,7 @@ end
         @test master_nl isa Verlet.Neighbors.MasterNeighborList
         @test lj.neighbors isa Verlet.Neighbors.PotentialNeighborList
 
-        Verlet.Neighbors.compute_all_forces!(sys, ff)
+        Verlet.Core.compute_all_forces!(sys, ff)
 
         F_ref = zeros(SVector{3,T_Float}, sys.natoms)
         for i in 1:sys.natoms-1
@@ -96,7 +96,7 @@ end
 
     for method in [:cells, :bruteforce, :all_pairs]
         Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=method)
-        Verlet.Neighbors.compute_all_forces!(sys, ff)
+        Verlet.Core.compute_all_forces!(sys, ff)
 
         F_ref = zeros(SVector{3,T_Float}, sys.natoms)
         for i in 1:sys.natoms-1

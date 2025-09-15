@@ -17,7 +17,7 @@ export System, natoms, natomtypes, AbstractBox, velocity_verlet!, potential_ener
 export CubicBox, minimum_image, wrap_positions!, box_length
 export T_Float, T_Int, Dims
 export PotentialNeighborList, MasterNeighborEntry, MasterNeighborList
-export AbstractPotentialPair, AbstractPairPotential, AbstractBondPotential, AbstractAnglePotential, AbstractDihedralPotential, AbstractImproperPotential
-export compute_forces!
+export AbstractPotentialPair, AbstractPairPotential, AbstractBondPotential, AbstractAnglePotential, AbstractDihedralPotential, AbstractImproperPotential, AbstractNeighborList
+export compute_forces!, compute_all_forces!, ForceField
 
 end

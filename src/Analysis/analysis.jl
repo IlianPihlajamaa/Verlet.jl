@@ -1,6 +1,6 @@
 module Analysis
 
-using ..Core
+import ..Core
 include("analysis.jl")
 
 end

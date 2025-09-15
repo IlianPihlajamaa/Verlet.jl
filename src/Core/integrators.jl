@@ -25,7 +25,6 @@ function potential_energy(system::System{T,IT,Dims}, forces::Function) where {T,
     F_U_kw = try
         forces(system.positions; return_potential=true)
     catch e
-        println("Caught error in potential_energy: $e")
         nothing
     end
     if F_U_kw !== nothing && F_U_kw isa Tuple && length(F_U_kw) == 2
