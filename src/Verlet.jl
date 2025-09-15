@@ -6,10 +6,10 @@ using .Core
 include("Neighbors/Neighbors.jl")
 using .Neighbors
 
-include("Potentials/ModPotentials.jl")
+include("Potentials/Potentials.jl")
 using .Potentials
 
-include("Constraints/ModConstraints.jl")
+include("Constraints/Constraints.jl")
 using .Constraints
 
 include("Thermostats/Thermostats.jl")
