@@ -1,6 +1,9 @@
+<<<<<<< HEAD:src/Potentials/pair_potentials.jl
 using ..Core
 using StructArrays
 
+=======
+>>>>>>> e020923 (fix all namespaces):src/Potentials/pairpotentials.jl
 """
     LJPair{T<:Number}
 Parameters for a Lennard-Jones interaction between two particle types.

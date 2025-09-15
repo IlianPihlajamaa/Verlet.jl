@@ -1,5 +1,3 @@
-using StaticArrays, LinearAlgebra
-
 """
     System(T<:AbstractFloat, IT<:Integer, Dims)
 

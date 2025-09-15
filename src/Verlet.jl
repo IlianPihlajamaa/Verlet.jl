@@ -3,6 +3,7 @@ module Verlet
 include("Core/Core.jl")
 using .Core
 
+<<<<<<< HEAD
 include("Potentials/Potentials.jl")
 using .Potentials
 
@@ -10,6 +11,15 @@ include("Neighbors/Neighbors.jl")
 using .Neighbors
 
 include("Constraints/Constraints.jl")
+=======
+include("Neighbors/Neighbors.jl")
+using .Neighbors
+
+include("Potentials/ModPotentials.jl")
+using .Potentials
+
+include("Constraints/ModConstraints.jl")
+>>>>>>> e020923 (fix all namespaces)
 using .Constraints
 
 include("Thermostats/Thermostats.jl")

@@ -1,9 +1,8 @@
-using LinearAlgebra, StaticArrays
-
 # Bonded potentials
-export AbstractBondPotential, HarmonicBond, Bond
-export AbstractAnglePotential, HarmonicAngle, Angle
-export AbstractDihedralPotential, PeriodicDihedral, Dihedral
+export HarmonicBond, Bond
+export HarmonicAngle, Angle
+export PeriodicDihedral, Dihedral
+import ..Core: compute_forces!
 
 
 # Concrete implementations of bonded potentials
@@ -25,20 +24,32 @@ end
 
 # Structs to hold the particle indices for each interaction
 # These are what will be stored in the System's specific_potentials list
+<<<<<<< HEAD
 struct Bond
+=======
+struct Bond{T<:AbstractBondPotential}
+>>>>>>> e020923 (fix all namespaces)
     i::Int
     j::Int
     potential::AbstractBondPotential
 end
 
+<<<<<<< HEAD
 struct Angle
+=======
+struct Angle{T<:AbstractAnglePotential}
+>>>>>>> e020923 (fix all namespaces)
     i::Int
     j::Int
     k::Int
     potential::AbstractAnglePotential
 end
 
+<<<<<<< HEAD
 struct Dihedral
+=======
+struct Dihedral{T<: AbstractDihedralPotential}
+>>>>>>> e020923 (fix all namespaces)
     i::Int
     j::Int
     k::Int

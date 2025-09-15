@@ -1,6 +1,11 @@
+<<<<<<< HEAD
 using LinearAlgebra, StaticArrays
 
 mutable struct Coulomb{IntT<:Integer, T<:AbstractPotentialPair} <: AbstractPairPotential
+=======
+import ..Core: compute_forces!
+mutable struct Coulomb{IntT<:Integer, T<:AbstractPotentialPair, T_Float} <: AbstractPairPotential
+>>>>>>> e020923 (fix all namespaces)
     params::PairTable{T}
     exclusions::Vector{Tuple{IntT, IntT}}
     neighbors::PotentialNeighborList{T}
@@ -8,7 +13,11 @@ mutable struct Coulomb{IntT<:Integer, T<:AbstractPotentialPair} <: AbstractPairP
 end
 
 function Coulomb(params::PairTable{T}, exclusions, skin) where T
+<<<<<<< HEAD
     neighbors = StructArray{NeighborPair{T, T_int}}(undef, 0)
+=======
+    neighbors = StructArray{Neighbors.NeighborPair{T, T_Int}}(undef, 0)
+>>>>>>> e020923 (fix all namespaces)
     return Coulomb(params, exclusions, neighbors, skin)
 end
 

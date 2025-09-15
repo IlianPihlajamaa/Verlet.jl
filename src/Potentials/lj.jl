@@ -1,6 +1,10 @@
-using LinearAlgebra, StaticArrays
+import ..Core: compute_forces!
 
+<<<<<<< HEAD
 mutable struct LennardJones{IntT<:Integer, T<:AbstractPotentialPair} <: AbstractPairPotential
+=======
+mutable struct LennardJones{IntT<:Integer, T<:AbstractPotentialPair, T_Float} <: AbstractPairPotential
+>>>>>>> e020923 (fix all namespaces)
     params::PairTable{T}
     exclusions::Vector{Tuple{IntT, IntT}}
     neighbors::PotentialNeighborList{T}
@@ -8,10 +12,19 @@ mutable struct LennardJones{IntT<:Integer, T<:AbstractPotentialPair} <: Abstract
 end
 
 function LennardJones(params::PairTable{T}, exclusions, skin) where T
+<<<<<<< HEAD
     neighbors = StructArray{NeighborPair{T, T_int}}(undef, 0)
     return LennardJones(params, exclusions, neighbors, skin)
 end
 
+=======
+    neighbors = StructArray{Neighbors.NeighborPair{T, T_Int}}(undef, 0)
+    return LennardJones(params, exclusions, neighbors, skin)
+end
+
+
+
+>>>>>>> e020923 (fix all namespaces)
 function compute_forces!(pot::LennardJones, sys::System)
     for pair_info in pot.neighbors
         i = pair_info.i

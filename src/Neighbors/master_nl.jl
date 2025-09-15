@@ -1,6 +1,10 @@
+<<<<<<< HEAD
 using LinearAlgebra, StaticArrays
 
 @inline function _squared_distance_min_image(R::AbstractVector, i::T_int, j::T_int, box::CubicBox)
+=======
+@inline function _squared_distance_min_image(R::AbstractVector, i::T_Int, j::T_Int, box::CubicBox)
+>>>>>>> e020923 (fix all namespaces)
     dr = R[i] - R[j]
     dr = minimum_image(dr, box)
     return dot(dr, dr)

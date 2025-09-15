@@ -1,9 +1,7 @@
 using ..Core
 using StructArrays
 
-struct ForceField{ForcesTuple}
-    layers::ForcesTuple
-end
+
 
 function is_excluded(pot::Potentials.AbstractPairPotential, i::Integer, j::Integer)
     # This is a placeholder. A real implementation would be more efficient.
@@ -44,10 +42,8 @@ function build_all_neighbors!(master_nl::MasterNeighborList, ff::ForceField, sys
     end
 end
 
-function compute_all_forces!(sys::System, ff::ForceField)
-    # Reset forces before calculation
-    fill!(sys.forces, zero(eltype(sys.forces)))
 
+<<<<<<< HEAD
     # Pairwise forces from the force field layers
     for pot in ff.layers
         Potentials.compute_forces!(pot, sys)
@@ -58,3 +54,5 @@ function compute_all_forces!(sys::System, ff::ForceField)
         Core.compute_forces!(interaction, sys)
     end
 end
+=======
+>>>>>>> e020923 (fix all namespaces)
