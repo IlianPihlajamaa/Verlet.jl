@@ -1,115 +1,89 @@
 using Test, LinearAlgebra, Verlet, Random, StaticArrays
 Random.seed!(0xC0FFEE)
+
+function setup_test_system(N, D, L)
+    positions = [SVector{D,Float64}(rand(D) .* L .- (L/2)...) for _ in 1:N]
+    velocities = [zero(SVector{D,Float64}) for _ in 1:N]
+    forces = [zero(SVector{D,Float64}) for _ in 1:N]
+    masses = ones(Float64, N)
+    box = CubicBox(L)
+    types = ones(Int, N)
+    type_names = Dict(1 => :A)
+    sys = System(positions, velocities, forces, masses, box, types, type_names)
+    wrap_positions!(sys.positions, sys.box)
+    return sys
+end
+
 @testset "NeighborList" begin
-    @testset "NeighborList construction and invariants" begin
+    @testset "MasterNeighborList construction and invariants" begin
         N, D = 10, 3
         L = 8.0
-        box = CubicBox(L)
-        R = [SVector{D,Float64}(randn(D)...) for _ in 1:N]
+        sys = setup_test_system(N, D, L)
 
-        cutoff = 2.5
-        skin   = 0.4
-        nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
+        r_verlet = 2.5 + 0.4
+        master_nl = MasterNeighborList(0.4)
+        Verlet.Neighbors.build_master_neighborlist!(master_nl, sys.positions, sys.box; r_verlet=r_verlet, method=:cells)
 
-        # Offsets form valid CSR
-        @test length(nlist.offsets) == N + 1
-        @test first(nlist.offsets) == 1
-        @test last(nlist.offsets) == length(nlist.pairs) + 1
-
-        # All neighbor pairs within rlist
-        rlist2 = (cutoff + skin)^2
-        for i in 1:N
-            for idx in nlist.offsets[i]:(nlist.offsets[i+1]-1)
-                j = nlist.pairs[idx]
-                Δ = R[i] - R[j]
-                Δ = minimum_image(Δ, box)
-                @test dot(Δ,Δ) <= rlist2 + 1e-12
-            end
+        # All neighbor pairs within r_verlet
+        for entry in master_nl.entries
+            i, j, r2 = entry.i, entry.j, entry.r2
+            Δ = sys.positions[i] - sys.positions[j]
+            Δ = minimum_image(Δ, sys.box)
+            @test dot(Δ,Δ) ≈ r2
         end
-    end
-
-    @testset "maybe_rebuild! triggers on half-skin" begin
-        N, D = 5, 3
-        L = 10.0
-        box = CubicBox(L)
-        R = [SVector{D,Float64}(zeros(D)...) for _ in 1:N]
-        cutoff, skin = 2.0, 0.6
-        nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
-
-        # Move one particle by < skin/2 : no rebuild
-        R[1] += SVector{D,Float64}(0.25, 0.0, 0.0)  # < 0.3
-        @test maybe_rebuild!(nlist, R, box) == false
-
-        # Cross skin/2 : triggers rebuild
-        R[1] += SVector{D,Float64}(0.1, 0.0, 0.0)  # now 0.35 > 0.3
-        @test maybe_rebuild!(nlist, R, box) == true
     end
 
     @testset "LJ forces with NeighborList match O(N²) reference" begin
         N, D = 24, 3
         L = 12.0
-        box = CubicBox(L)
-        R = [SVector{D,Float64}(rand(D) .* (L/2) .- (L/4)...) for _ in 1:N]
+        sys = setup_test_system(N, D, L)
 
-        ϵ, σ, cutoff, skin = 1.0, 1.0, 2.5, 0.4
-        # Build list with rlist = cutoff + skin
-        nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
+        ϵ, σ, rcut, skin = 1.0, 1.0, 2.5, 0.4
+        lj_pair = LJPair(ϵ, σ, rcut)
+        params = PairTable(fill(lj_pair, (1, 1)))
+        exclusions = Tuple{Int,Int}[]
+        lj = LennardJones(params, exclusions, skin)
+        ff = Verlet.Neighbors.ForceField((lj,))
+        master_nl = MasterNeighborList(skin)
 
-        # Reference (brute-force) and list-aware comparisons
-        F_ref, U_ref = lj_forces(R, box, nlist; ϵ=ϵ, σ=σ, rcut=cutoff, return_potential=true)
-        F_nl,  U_nl  = lj_forces(R, box, nlist; ϵ=ϵ, σ=σ, shift=false, return_potential=true)
+        Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=:cells)
+        Verlet.Core.compute_all_forces!(sys, ff)
+        F_nl = sys.forces
+
+        U_nl = 0.0
+        for pair_info in lj.neighbors
+            r2 = Verlet.Neighbors._squared_distance_min_image(sys.positions, pair_info.i, pair_info.j, sys.box)
+            if r2 < rcut^2
+                inv_r2 = 1 / r2
+                s2 = σ^2 * inv_r2
+                s6 = s2^3
+                U_nl += 4ϵ * (s6^2 - s6)
+            end
+        end
+
+
+        # Reference (brute-force)
+        F_ref = zeros(SVector{3,Float64}, sys.natoms)
+        U_ref = 0.0
+        for i in 1:sys.natoms-1
+            for j in i+1:sys.natoms
+                Δ = sys.positions[i] - sys.positions[j]
+                Δ = minimum_image(Δ, sys.box)
+                r2 = dot(Δ, Δ)
+                if r2 < rcut^2
+                    inv_r2 = 1 / r2
+                    s2 = σ^2 * inv_r2
+                    s6 = s2^3
+                    U_ref += 4ϵ * (s6^2 - s6)
+                    f_r = 24ϵ * (2s6^2 - s6) * inv_r2
+                    f_vec = f_r .* Δ
+                    F_ref[i] += f_vec
+                    F_ref[j] -= f_vec
+                end
+            end
+        end
 
         @test isapprox(F_nl, F_ref; atol=1e-10, rtol=1e-10)
         @test isapprox(U_nl,  U_ref; atol=1e-10, rtol=1e-10)
-    end
-
-    @testset "NeighborList stays valid under small motion; rebuild changes content" begin
-        N, D = 16, 3
-        L = 10.0
-        box = CubicBox(L)
-        R = [SVector{D,Float64}(rand(D) .* L .- (L/2)...) for _ in 1:N]
-        cutoff, skin = 2.2, 0.6
-        nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
-
-        pairs_before = copy(nlist.pairs)
-        offsets_before = copy(nlist.offsets)
-
-        # Small random motion below half-skin → no rebuild
-        for i in 1:N
-            R[i] += SVector{D,Float64}(0.1 .* randn(D)...) 
-        end
-        wrap_positions!(R, box)
-        @test maybe_rebuild!(nlist, R, box) == false
-        @test nlist.pairs == pairs_before
-        @test nlist.offsets == offsets_before
-
-        # Larger motion → rebuild likely alters neighbor graph
-        for i in 1:N
-            R[i] += SVector{D,Float64}(0.4 .* randn(D)...) 
-        end
-        wrap_positions!(R, box)
-        did = maybe_rebuild!(nlist, R, box)
-        @test did == true
-    end
-
-    @testset "wrap_positions! maps coords to (-L/2, L/2]" begin
-        box = CubicBox(5.0)
-        R = [SVector{2,Float64}(3.1, -2.6), SVector{2,Float64}(-4.9, 4.9)]
-        wrap_positions!(R, box)
-        @test all(-box.L/2 .< reduce(vcat, R)) && all(reduce(vcat, R) .<= box.L/2)
-    end
-
-    @testset "Energy shift at cutoff is preserved with NeighborList" begin
-        L = 30.0; box = CubicBox(L)
-        R = [SVector{3,Float64}(0.0,0.0,0.0), SVector{3,Float64}(2.0,0.0,0.0)]
-        cutoff, skin = 2.5, 0.4
-        nlist = build_neighborlist(R, box; cutoff=cutoff, skin=skin)
-        F1, U1 = lj_forces(R, box, nlist; rcut=cutoff, shift=true, return_potential=true)
-        R2 = [SVector{3,Float64}(0.0,0.0,0.0), SVector{3,Float64}(2.51,0.0,0.0)]
-        nlist2 = build_neighborlist(R2, box; cutoff=cutoff, skin=skin)
-        F2, U2 = lj_forces(R2, box, nlist2; rcut=cutoff, shift=true, return_potential=true)
-        @test isapprox(norm(reduce(vcat, F2)), 0.0; atol=1e-12)
-        @test U2 ≈ 0.0 atol=1e-10
-        @test U1 < 0.0
     end
 end

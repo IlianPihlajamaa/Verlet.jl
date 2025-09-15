@@ -9,7 +9,7 @@ using LinearAlgebra, StaticArrays
 end
 
 @testset "Neighbors" begin
-    # include("test_neighborlist.jl") # Old API
+    include("test_neighborlist.jl")
     include("test_cellgrid.jl")
     include("test_forcefields.jl")
 end
