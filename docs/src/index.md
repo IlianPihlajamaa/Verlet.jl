@@ -49,12 +49,6 @@ Verlet.Core.velocity_verlet!(sys, force_wrapper, dt)
 sys.positions
 ```
 
-## Next Steps
-
-Check out the \[Guide → Constrained Dynamics](@ref constraints-guide) section to learn how to:
-
-- Set up bond constraints with [`DistanceConstraints`](@ref)
-- Run constrained dynamics with [`velocity_verlet_shake_rattle!`](@ref)
 
 
 ## Harmonic oscillator
@@ -117,16 +111,6 @@ end
 (round(minimum(energies), digits=6), round(maximum(energies), digits=6))
 ```
 
-## Performance tips
-
-* Keep arrays as `Matrix{Float64}` / `Vector{Float64}` to avoid type instability.
-* Prefer **in-place** force computations in your own code paths; if you must allocate, reuse buffers.
-* Avoid huge `dt`. Start small (e.g., `1e-3` in your time units) and increase cautiously.
-
-See also: \[Numerics & Pitfalls]\(@ref numerics).
-
-With constraints, you can simulate rigid bonds (e.g. water models) and safely
-increase timestep sizes while preserving stability.
 
 ## ForceField API for Potentials
 
@@ -183,8 +167,7 @@ Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)
 - [`build_master_neighborlist!`](@ref) — construct a new master neighbor list.
 - [`wrap_positions!`](@ref) — enforce periodic wrapping of coordinates.
 
-# 4. Run the simulation
-dt = 0.1
+
 # Wrap the force function to match the integrator's signature
 force_wrapper(R) = compute_forces_for_integrator(R, sys, ff)
 velocity_verlet!(sys, force_wrapper, dt)
@@ -259,16 +242,6 @@ end
 (round(minimum(energies), digits=6), round(maximum(energies), digits=6))
 ```
 
-## Performance tips
-
-* Keep arrays as `Matrix{Float64}` / `Vector{Float64}` to avoid type instability.
-* Prefer **in-place** force computations in your own code paths; if you must allocate, reuse buffers.
-* Avoid huge `dt`. Start small (e.g., `1e-3` in your time units) and increase cautiously.
-
-See also: \[Numerics & Pitfalls]\(@ref numerics).
-
-With constraints, you can simulate rigid bonds (e.g. water models) and safely
-increase timestep sizes while preserving stability.
 
 ## ForceField API for Potentials
 
