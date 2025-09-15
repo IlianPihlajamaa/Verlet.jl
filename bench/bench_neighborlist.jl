@@ -19,7 +19,7 @@ using Printf
 # ----------------------------
 function parse_args(args::Vector{String})
     opts = Dict{String,Any}(
-        "N" => [128, 256, 512, 1024, 2048, 4096, 8192],
+        "N" => [128, 256, 512, 1024],
         "D" => 3,
         "rho" => 1.0,
         "rcut" => 1.25,

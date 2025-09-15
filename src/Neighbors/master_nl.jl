@@ -69,6 +69,12 @@ function _build_master_nl_cells!(entries, R, box, rlist2, grid)
                     if dx == 0 && dy == 0 && dz <= 0
                         continue
                     end
+                    # Tie-breakers for grids with n==2 along any axis to prevent double counting
+                    if (nx == 2 && dx == 1 && cx != 1) ||
+                       (ny == 2 && dy == 1 && cy != 1) ||
+                       (nz == 2 && dz == 1 && cz != 1)
+                        continue
+                    end
                     ncx = mod1(cx + dx, nx)
                     ncy = mod1(cy + dy, ny)
                     ncz = mod1(cz + dz, nz)
@@ -111,11 +117,6 @@ function _build_master_nl_cells!(entries, R, box, rlist2, grid)
             # Neighbor cell pairs: iterate precomputed unique neighbor cells
             @inbounds for t in 1:ncount
                 cc_idx = neighs[t]
-                # Avoid double-counting across periodic wraps when grid dims are small (e.g., nx=2)
-                # Process each inter-cell pair only once by enforcing cc_idx > c_idx
-                if cc_idx <= c_idx
-                    continue
-                end
                 j = heads[cc_idx]
                 while j != 0
                     r2 = _squared_distance_min_image(R, i, j, box)
@@ -384,6 +385,12 @@ function build_master_neighborlist!(master_nl::MasterNeighborCSRList, R::Abstrac
             neighs = StaticArrays.MVector{13,Int}(undef); ncount = 0
             for dz in -1:1, dy in -1:1, dx in 0:1
                 if (dx == 0 && dy < 0) || (dx == 0 && dy == 0 && dz <= 0)
+                    continue
+                end
+                # Tie-breakers for n==2 along any axis
+                if (nx == 2 && dx == 1 && cx != 1) ||
+                   (ny == 2 && dy == 1 && cy != 1) ||
+                   (nz == 2 && dz == 1 && cz != 1)
                     continue
                 end
                 ncx = mod1(cx + dx, nx); ncy = mod1(cy + dy, ny); ncz = mod1(cz + dz, nz)
