@@ -1,25 +1,25 @@
 using LinearAlgebra, StaticArrays
 
-mutable struct Coulomb{IntT<:Integer, T<:AbstractPotentialPair} <: AbstractPairPotential
+mutable struct Coulomb{IntT<:Integer, T<:Core.AbstractPotentialPair, T_Float} <: Core.AbstractPairPotential
     params::PairTable{T}
     exclusions::Vector{Tuple{IntT, IntT}}
-    neighbors::PotentialNeighborList{T}
+    neighbors::Neighbors.PotentialNeighborList{T}
     skin::T_Float
 end
 
 function Coulomb(params::PairTable{T}, exclusions, skin) where T
-    neighbors = StructArray{NeighborPair{T, T_int}}(undef, 0)
+    neighbors = StructArray{Neighbors.NeighborPair{T, Core.T_Int}}(undef, 0)
     return Coulomb(params, exclusions, neighbors, skin)
 end
 
-function compute_forces!(pot::Coulomb, sys::System)
+function Core.compute_forces!(pot::Coulomb, sys::Core.System)
     for pair_info in pot.neighbors
         i = pair_info.i
         j = pair_info.j
         p = pair_info.pair
 
         Δ = sys.positions[i] - sys.positions[j]
-        Δ = minimum_image(Δ, sys.box)
+        Δ = Core.minimum_image(Δ, sys.box)
         r2 = dot(Δ, Δ)
 
         if r2 < p.rc^2

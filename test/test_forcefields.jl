@@ -12,7 +12,7 @@ function setup_test_system()
     velocities = [SVector{D,T_Float}(randn(D)...) for _ in 1:N]
     forces = [zero(SVector{D,T_Float}) for _ in 1:N]
     masses = ones(T_Float, N)
-    types = ones(T_int, N)
+    types = ones(T_Int, N)
     type_names = Dict(1 => :A)
     sys = System(positions, velocities, forces, masses, box, types, type_names)
     return sys
@@ -26,19 +26,19 @@ end
     rc = 2.5
     lj_pair = LJPair(ϵ, σ, rc)
     params = PairTable(fill(lj_pair, (1, 1)))
-    exclusions = Tuple{T_int,T_int}[]
+    exclusions = Tuple{T_Int,T_Int}[]
     lj = LennardJones(params, exclusions, 0.5)
 
     ff = Verlet.Neighbors.ForceField((lj,))
 
     master_skin = 0.5
-    master_nl = MasterNeighborList(master_skin)
+    master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
 
     for method in [:cells, :bruteforce, :all_pairs]
         Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=method)
 
-        @test master_nl isa MasterNeighborList
-        @test lj.neighbors isa PotentialNeighborList
+        @test master_nl isa Verlet.Neighbors.MasterNeighborList
+        @test lj.neighbors isa Verlet.Neighbors.PotentialNeighborList
 
         Verlet.Neighbors.compute_all_forces!(sys, ff)
 
@@ -73,7 +73,7 @@ function setup_test_system_with_charges()
     velocities = [SVector{D,T_Float}(randn(D)...) for _ in 1:N]
     forces = [zero(SVector{D,T_Float}) for _ in 1:N]
     masses = ones(T_Float, N)
-    types = ones(T_int, N)
+    types = ones(T_Int, N)
     type_names = Dict(1 => :A)
     sys = System(positions, velocities, forces, masses, box, types, type_names)
     return sys
@@ -86,13 +86,13 @@ end
     rc = 5.0
     coul_pair = CoulPair(q1q2, rc)
     params = PairTable(fill(coul_pair, (1, 1)))
-    exclusions = Tuple{T_int,T_int}[]
+    exclusions = Tuple{T_Int,T_Int}[]
     coul = Coulomb(params, exclusions, 0.5)
 
     ff = Verlet.Neighbors.ForceField((coul,))
 
     master_skin = 0.5
-    master_nl = MasterNeighborList(master_skin)
+    master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
 
     for method in [:cells, :bruteforce, :all_pairs]
         Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=method)

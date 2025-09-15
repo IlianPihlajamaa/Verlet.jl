@@ -1,1 +1,6 @@
-# RDF, MSD, VACF, RMSD, gyration radius, etc.
+module Analysis
+
+using ..Core
+include("analysis.jl")
+
+end

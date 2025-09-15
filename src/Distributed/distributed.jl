@@ -1,1 +1,6 @@
-# MPI domain decomposition, halo exchange, etc.
+module Distributed
+
+using ..Core
+include("distributed.jl")
+
+end

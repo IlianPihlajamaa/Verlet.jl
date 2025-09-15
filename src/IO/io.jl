@@ -1,1 +1,6 @@
-# XYZ, PDB, GRO readers/writers, checkpoint/restart API
+module IO
+
+using ..Core
+include("io.jl")
+
+end

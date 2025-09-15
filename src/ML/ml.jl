@@ -1,1 +1,6 @@
-# ML potentials, differentiable integrators, etc.
+module ML
+
+using ..Core
+include("ml.jl")
+
+end

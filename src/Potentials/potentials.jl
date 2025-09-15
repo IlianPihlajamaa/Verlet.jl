@@ -1,33 +1,22 @@
-using ..Core
-using StructArrays
+module Potentials
 
-"""
-    LJPair{T<:Number}
+import ..Core
+using ..Neighbors
 
-Parameters for a Lennard-Jones interaction between two particle types.
-"""
-struct LJPair{T<:Number} <: AbstractPotentialPair
-    ε::T
-    σ::T
-    rc::T
+# Potentials - defines different potential energy functions
+
+# Abstract types and structs for pairwise potentials
+include("pairpotentials.jl")
+
+# Specific pairwise potentials
+include("lj.jl")
+include("coulomb.jl")
+
+# Bonded potentials
+include("bonded.jl")
+
+export LennardJones, Coulomb, LJPair, CoulPair, PairTable, Bond, Angle, Dihedral, HarmonicBond, HarmonicAngle, PeriodicDihedral,  potential_energy
+export  AbstractBondPotential, AbstractAnglePotential, AbstractDihedralPotential, AbstractImproperPotential
+export NeighborPair, PotentialNeighborList, MasterNeighborEntry, MasterNeighborList
+
 end
-
-"""
-    CoulPair{T<:Number}
-
-Parameters for a Coulomb interaction between two particle types.
-"""
-struct CoulPair{T<:Number} <: AbstractPotentialPair
-    q1q2::T # product of charges
-    rc::T
-end
-
-"""
-    PairTable{F<:AbstractPotentialPair}
-
-A table to store parameters for each pair of particle types.
-"""
-struct PairTable{F<:AbstractPotentialPair}
-    table::Matrix{F}
-end
-

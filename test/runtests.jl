@@ -1,5 +1,4 @@
 using Test
-using Verlet
 
 using LinearAlgebra, StaticArrays
 

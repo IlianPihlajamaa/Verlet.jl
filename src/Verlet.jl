@@ -3,11 +3,11 @@ module Verlet
 include("Core/Core.jl")
 using .Core
 
-include("Potentials/Potentials.jl")
-using .Potentials
-
 include("Neighbors/Neighbors.jl")
 using .Neighbors
+
+include("Potentials/Potentials.jl")
+using .Potentials
 
 include("Constraints/Constraints.jl")
 using .Constraints
@@ -18,7 +18,7 @@ using .Thermostats
 # Re-export from Core
 export System, natoms, natomtypes, AbstractBox, velocity_verlet!, potential_energy, kinetic_energy
 export CubicBox, minimum_image, wrap_positions!, box_length
-export T_Float, T_int, Dims
+export T_Float, T_Int, Dims
 export NeighborPair, PotentialNeighborList, MasterNeighborEntry, MasterNeighborList
 export AbstractPotentialPair, AbstractPairPotential, AbstractBondPotential, AbstractAnglePotential, AbstractDihedralPotential, AbstractImproperPotential
 

@@ -41,7 +41,7 @@ using Random
 
         cutoff, skin = 2.2, 0.5
         r_verlet = cutoff
-        master_nl = MasterNeighborList(skin)
+        master_nl = Verlet.Neighbors.MasterNeighborList(skin)
         build_master_neighborlist!(master_nl, R, box; r_verlet=r_verlet, method=:cells)
 
         rlist2 = (cutoff + skin)^2

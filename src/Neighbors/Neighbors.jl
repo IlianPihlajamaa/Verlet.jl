@@ -2,6 +2,7 @@ module Neighbors
 
 using ..Core
 using LinearAlgebra, StaticArrays
+using StructArrays
 
 include("neighborlist.jl") # Deprecated, but keep for now.
 include("cellgrid.jl")

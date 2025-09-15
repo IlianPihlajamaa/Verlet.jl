@@ -28,7 +28,7 @@ sys = System(positions, velocities, forces_storage, masses, box, types, type_nam
 rc = 2.5
 lj_pair = Verlet.Potentials.LJPair(ϵ, σ, rc)
 params = Verlet.Potentials.PairTable(fill(lj_pair, (1, 1)))
-exclusions = Tuple{Verlet.Core.T_int,Verlet.Core.T_int}[]
+exclusions = Tuple{Verlet.Core.T_Int,Verlet.Core.T_Int}[]
 lj = Verlet.Potentials.LennardJones(params, exclusions, 0.5)
 ff = Verlet.Neighbors.ForceField((lj,))
 
@@ -152,7 +152,7 @@ sys = System(
 # 2. Define a Lennard-Jones potential
 lj = Verlet.Potentials.LennardJones(
     Verlet.Potentials.PairTable(fill(Verlet.Potentials.LJPair(1.0, 1.0, 2.5), (1, 1))),
-    Tuple{Verlet.Core.T_int,Verlet.Core.T_int}[],
+    Tuple{Verlet.Core.T_Int,Verlet.Core.T_Int}[],
     0.5
 )
 
@@ -294,7 +294,7 @@ sys = System(
 # 2. Define a Lennard-Jones potential
 lj = LennardJones(
     PairTable(fill(LJPair(1.0, 1.0, 2.5), (1, 1))),
-    Tuple{T_int,T_int}[],
+    Tuple{T_Int,T_Int}[],
     0.5
 )
 

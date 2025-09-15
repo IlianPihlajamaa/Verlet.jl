@@ -1,1 +1,6 @@
-# GPU kernels, CUDA backend, etc.
+module GPU
+
+using ..Core
+include("gpu.jl")
+
+end
