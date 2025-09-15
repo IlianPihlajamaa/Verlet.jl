@@ -36,13 +36,13 @@ exclusions = Tuple{T_int,T_int}[]
 lj = LennardJones(params, exclusions, 0.5)
 
 # 3. Create a ForceField
-ff = ForceField((lj,))
+ff = Verlet.Neighbors.ForceField((lj,))
 
 # 4. Build neighbor lists and compute forces
 master_skin = 0.5
-master_nl = MasterNeighborList(master_skin)
-build_all_neighbors!(master_nl, ff, sys)
-compute_all_forces!(sys, ff)
+master_nl = Verlet.Core.MasterNeighborList(master_skin)
+Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys)
+Verlet.Neighbors.compute_all_forces!(sys, ff)
 
 # The forces are now stored in sys.forces
 println(sys.forces[1])

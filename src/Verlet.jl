@@ -1,30 +1,37 @@
 module Verlet
 
 include("Core/Core.jl")
-include("Potentials/Potentials.jl")
-include("Neighbors/Neighbors.jl")
-include("Constraints/Constraints.jl")
-include("Thermostats/Thermostats.jl")
-
 using .Core
-using .Neighbors
+
+include("Potentials/Potentials.jl")
 using .Potentials
+
+include("Neighbors/Neighbors.jl")
+using .Neighbors
+
+include("Constraints/Constraints.jl")
 using .Constraints
+
+include("Thermostats/Thermostats.jl")
 using .Thermostats
 
-export Core, Neighbors, Potentials, Constraints, Thermostats
-
-# Re-export symbols from submodules
+# Re-export from Core
 export System, natoms, natomtypes, AbstractBox, velocity_verlet!, potential_energy, kinetic_energy
 export CubicBox, minimum_image, wrap_positions!, box_length
 export T_Float, T_int, Dims
-export AbstractPotentialPair, AbstractPairPotential, AbstractBondPotential
-export ForceField, build_all_neighbors!, compute_all_forces!
-export MasterNeighborList, PotentialNeighborList, build_master_neighborlist!
-export build_cellgrid, rebin!
-export LJPair, CoulPair, PairTable, LennardJones, Coulomb, Bond, Angle, Dihedral, HarmonicBond, HarmonicAngle, PeriodicDihedral
-export DistanceConstraints, apply_shake!, apply_rattle!, velocity_verlet_shake_rattle!, constraint_residuals, remove_com_motion!
-export langevin_baoab!, degrees_of_freedom, instantaneous_temperature, velocity_rescale!, langevin_baoab_constrained!
+export NeighborPair, PotentialNeighborList, MasterNeighborEntry, MasterNeighborList
+export AbstractPotentialPair, AbstractPairPotential, AbstractBondPotential, AbstractAnglePotential, AbstractDihedralPotential, AbstractImproperPotential
 
+# Re-export from Potentials
+export LennardJones, Coulomb, LJPair, CoulPair, PairTable, Bond, Angle, Dihedral, HarmonicBond, HarmonicAngle, PeriodicDihedral
+
+# Re-export from Neighbors
+export build_master_neighborlist!, build_cellgrid, rebin!, ForceField
+
+# Re-export from Constraints
+export DistanceConstraints, apply_shake!, apply_rattle!, velocity_verlet_shake_rattle!, remove_com_motion!, constraint_residuals
+
+# Re-export from Thermostats
+export degrees_of_freedom, instantaneous_temperature, velocity_rescale!, langevin_baoab!, langevin_baoab_constrained!
 
 end # module Verlet

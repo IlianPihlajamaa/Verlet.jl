@@ -11,7 +11,7 @@ classical **SHAKE** (positions) and **RATTLE** (velocities) algorithms.
 
 ## Defining Constraints
 
-Use [`DistanceConstraints`](@ref) to define a set of pairwise distance constraints:
+Use [`DistanceConstraints`](@ref Verlet.Constraints.DistanceConstraints) to define a set of pairwise distance constraints:
 
 
 ```@example constraints
@@ -36,7 +36,7 @@ Arguments:
 
 ## Constrained Integrator
 
-The [`velocity_verlet_shake_rattle!`](@ref) driver advances the system with constraints enforced:
+The [`velocity_verlet_shake_rattle!`](@ref Verlet.Constraints.velocity_verlet_shake_rattle!) driver advances the system with constraints enforced:
 
 
 ```@example constraints
@@ -70,7 +70,7 @@ This integrator:
 ## Degrees of Freedom
 
 Constraints reduce the effective number of degrees of freedom (DoF).
-The [`degrees_of_freedom`](@ref) function accounts for:
+The [`degrees_of_freedom`](@ref Verlet.Thermostats.degrees_of_freedom) function accounts for:
 
 - number of atoms × dimensions
 - minus one per constraint
@@ -97,7 +97,7 @@ Correct DoF is essential for unbiased temperature and pressure estimators.
 
 ## Removing Center-of-Mass Motion
 
-Use [`remove_com_motion!`](@ref) to zero the mass-weighted center-of-mass velocity or position.
+Use [`remove_com_motion!`](@ref Verlet.Constraints.remove_com_motion!) to zero the mass-weighted center-of-mass velocity or position.
 This prevents unphysical drift of the entire system.
 
 
@@ -123,7 +123,7 @@ Vcom = sum(sys.masses .* map(v -> v[1], sys.velocities)) / sum(sys.masses)
 - SHAKE/RATTLE typically converge in a few iterations for tree-like molecules.
 - For rings or stiff networks, increase `maxiter` or relax `tol`.
 - Always monitor constraint residuals if using larger timesteps.
-- Thermostat steps that randomize velocities should be followed by `apply_rattle!`.
+- Thermostat steps that randomize velocities should be followed by [`apply_rattle!`](@ref Verlet.Constraints.apply_rattle!).
 
 ## Common Pitfalls
 
@@ -133,7 +133,7 @@ Vcom = sum(sys.masses .* map(v -> v[1], sys.velocities)) / sum(sys.masses)
     boundaries unexpectedly.
   * A too-tight tolerance can lead to slow or failed convergence.
   * DoF reduction is essential: forgetting to pass `constraints` or `remove_com`
-    to [`degrees_of_freedom`](@ref) will bias temperature estimates.
+    to [`degrees_of_freedom`](@ref Verlet.Thermostats.degrees_of_freedom) will bias temperature estimates.
 
 ## Further Reading
 
@@ -153,13 +153,13 @@ All positions, velocities, and forces are now represented as `Vector{SVector{D, 
 
 ## See Also
 
-- [`System`](@ref): container for positions, velocities, and masses.
-- [`velocity_verlet!`](@ref): unconstrained Velocity-Verlet integrator.
-- [`degrees_of_freedom`](@ref): count effective translational degrees of freedom.
-- [`remove_com_motion!`](@ref): eliminate center-of-mass drift.
+- [`System`](@ref Verlet.Core.System): container for positions, velocities, and masses.
+- [`velocity_verlet!`](@ref Verlet.Core.velocity_verlet!): unconstrained Velocity-Verlet integrator.
+- [`degrees_of_freedom`](@ref Verlet.Thermostats.degrees_of_freedom): count effective translational degrees of freedom.
+- [`remove_com_motion!`](@ref Verlet.Constraints.remove_com_motion!): eliminate center-of-mass drift.
 
 For thermostatting with constraints, project velocities with
-[`apply_rattle!`](@ref) after randomization steps to remain on the constraint manifold.
+[`apply_rattle!`](@ref Verlet.Constraints.apply_rattle!) after randomization steps to remain on the constraint manifold.
 
 ## Next Steps
 

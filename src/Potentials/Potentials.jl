@@ -14,6 +14,8 @@ include("coulomb.jl")
 # Bonded potentials
 include("bonded.jl")
 
-export LJPair, CoulPair, PairTable, LennardJones, Coulomb, Bond, Angle, Dihedral, HarmonicBond, HarmonicAngle, PeriodicDihedral, compute_forces!
+export LennardJones, Coulomb, LJPair, CoulPair, PairTable, Bond, Angle, Dihedral, HarmonicBond, HarmonicAngle, PeriodicDihedral, compute_forces!, potential_energy
+export AbstractPotentialPair, AbstractPairPotential, AbstractBondPotential, AbstractAnglePotential, AbstractDihedralPotential, AbstractImproperPotential
+export NeighborPair, PotentialNeighborList, MasterNeighborEntry, MasterNeighborList
 
 end

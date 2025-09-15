@@ -8,13 +8,13 @@ using Test
         if interaction isa Bond
             vec_ij = system.positions[interaction.j] - system.positions[interaction.i]
             r = norm(vec_ij)
-            return potential_energy(interaction.potential, r)
+            return Verlet.Potentials.potential_energy(interaction.potential, r)
         elseif interaction isa Angle
             r_ji = system.positions[interaction.i] - system.positions[interaction.j]
             r_jk = system.positions[interaction.k] - system.positions[interaction.j]
             cos_theta = dot(r_ji, r_jk) / (norm(r_ji) * norm(r_jk))
             theta = acos(clamp(cos_theta, -1.0, 1.0))
-            return potential_energy(interaction.potential, theta)
+            return Verlet.Potentials.potential_energy(interaction.potential, theta)
         elseif interaction isa Dihedral
             r_ij = system.positions[interaction.j] - system.positions[interaction.i]
             r_jk = system.positions[interaction.k] - system.positions[interaction.j]
@@ -24,7 +24,7 @@ using Test
             cos_phi = dot(m, n) / (norm(m) * norm(n))
             sign_val = dot(r_ij, n) <= 0 ? 1.0 : -1.0
             phi = acos(clamp(cos_phi, -1.0, 1.0)) * sign_val
-            return potential_energy(interaction.potential, phi)
+            return Verlet.Potentials.potential_energy(interaction.potential, phi)
         end
         return 0.0
     end
@@ -40,8 +40,8 @@ using Test
         system = System(positions, [SVector(0.0,0.0,0.0) for _ in 1:2], [SVector(0.0,0.0,0.0) for _ in 1:2], [1.0, 1.0], CubicBox(10.0), [1, 1], Dict(1 => :A); specific_potentials=(bond,))
 
         # Calculate analytical forces
-        ff = ForceField(())
-        compute_all_forces!(system, ff)
+        ff = Verlet.Neighbors.ForceField(())
+        Verlet.Neighbors.compute_all_forces!(system, ff)
         f_analytical = copy(system.forces)
 
         # Calculate numerical forces using finite differences
@@ -75,8 +75,8 @@ using Test
         angle = Angle(1, 2, 3, angle_potential)
         system = System(positions, [SVector(0.0,0.0,0.0) for _ in 1:3], [SVector(0.0,0.0,0.0) for _ in 1:3], ones(3), CubicBox(10.0), ones(Int, 3), Dict(1 => :A); specific_potentials=(angle,))
 
-        ff = ForceField(())
-        compute_all_forces!(system, ff)
+        ff = Verlet.Neighbors.ForceField(())
+        Verlet.Neighbors.compute_all_forces!(system, ff)
         f_analytical = copy(system.forces)
 
         f_numerical = [SVector(0.0, 0.0, 0.0) for _ in 1:3]
@@ -106,8 +106,8 @@ using Test
         dihedral = Dihedral(1, 2, 3, 4, dihedral_potential)
         system = System(positions, [SVector(0.0,0.0,0.0) for _ in 1:4], [SVector(0.0,0.0,0.0) for _ in 1:4], ones(4), CubicBox(10.0), ones(Int, 4), Dict(1 => :A); specific_potentials=(dihedral,))
 
-        ff = ForceField(())
-        compute_all_forces!(system, ff)
+        ff = Verlet.Neighbors.ForceField(())
+        Verlet.Neighbors.compute_all_forces!(system, ff)
         f_analytical = copy(system.forces)
 
         f_numerical = [SVector(0.0, 0.0, 0.0) for _ in 1:4]

@@ -8,8 +8,6 @@ include("cellgrid.jl")
 include("master_nl.jl")
 include("forcefields.jl")
 
-export MasterNeighborList, PotentialNeighborList, build_master_neighborlist!, NeighborPair
-export build_cellgrid, rebin!
-export ForceField, build_all_neighbors!, compute_all_forces!
+export build_master_neighborlist!, build_cellgrid, rebin!, ForceField, build_all_neighbors!, compute_all_forces!
 
 end

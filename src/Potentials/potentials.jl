@@ -1,4 +1,4 @@
-# Using StructArrays for efficient storage and access
+using ..Core
 using StructArrays
 
 """

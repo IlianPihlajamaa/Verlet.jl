@@ -5,7 +5,7 @@ DocMeta.setdocmeta!(Verlet, :DocTestSetup, :(using Verlet); recursive=true)
 
 makedocs(
     sitename = "Verlet.jl",
-    modules = [Verlet],
+    modules = [Verlet, Verlet.Core, Verlet.Neighbors, Verlet.Potentials, Verlet.Constraints, Verlet.Thermostats],
     format = Documenter.HTML(prettyurls = get(ENV, "CI", "false") == "true"),
     checkdocs = :public,
         pages = [
