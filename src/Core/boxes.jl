@@ -17,18 +17,28 @@ end
 
 """
     minimum_image(Δ, box::CubicBox)
-    minimum_image(Δ, L)
 
 Apply the minimum-image convention to the displacement vector `Δ`
 for the periodic `box` (wraps components to (-L/2, L/2]) and return the new vector.
 """
-@inline minimum_image(Δ::AbstractVector, box::CubicBox) = minimum_image(Δ::AbstractVector, box_length(box))
 
-@inline function minimum_image(Δ::AbstractVector, L)
+@inline function minimum_image(Δ::AbstractVector, box::CubicBox)
+    L = box.L
     Δnew = Δ - L * round.(Δ / L)
     return Δnew
 end
 
+@inline function minimum_image(Δ::SVector{D,T},  box::CubicBox) where {D,T<:AbstractFloat}
+    L = box.L
+    dx_corr = @inbounds SVector{D,T}(ntuple(round(Δ[d]/L)*L, D))
+    return dx - dx_corr
+end
+
+@inline function minimum_image(Δ::SVector{3,T}, box::CubicBox) where {T<:AbstractFloat}
+    L = box.L
+    dx_corr = @inbounds SVector{3,T}(round(Δ[1]/L)*L, round(Δ[2]/L)*L, round(Δ[3]/L)*L)
+    return Δ - dx_corr
+end
 
 
 """

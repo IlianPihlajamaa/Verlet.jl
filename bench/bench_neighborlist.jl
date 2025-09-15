@@ -27,8 +27,8 @@ function parse_args(args::Vector{String})
         "samples" => 10,
         "seed" => 42,
         "potential" => false,      # set true to include potential accumulation
-        "builder" => "all",       # "all_pairs" | "cells" | "brute_force" | "all"
-        "storage" => "both",   # "entries" | "csr" | "both"
+        "builder" => "cells",       # "all_pairs" | "cells" | "brute_force" | "all"
+        "storage" => "all",   # "entries" | "csr" | "verlet" | "all"
     )
     for arg in args
         if occursin("=", arg)
@@ -129,8 +129,8 @@ for N in OPTS["N"]
     exclusions = Tuple{Int,Int}[]
     lj = LennardJones(params, exclusions, skin)
     ff = Verlet.Neighbors.ForceField((lj,))
-    storages = OPTS["storage"] == "both" ? ("entries", "csr") : (OPTS["storage"],)
-    nl =  Verlet.Neighbors.MasterNeighborCSRList(skin; N=sys.natoms)
+    storages = OPTS["storage"] in ("both", "all") ? ("entries", "csr", "verlet") : (OPTS["storage"],)
+    nl =  Verlet.Neighbors.MasterNeighborVerletList(skin; N=sys.natoms)
     Verlet.Neighbors.build_all_neighbors!(nl, ff, sys, method=:cells)
     @profview for i = 1:100
         Verlet.Neighbors.build_all_neighbors!(nl, ff, sys, method=:cells)
@@ -139,7 +139,13 @@ for N in OPTS["N"]
 
 
     for storage in storages
-        master_nl = storage == "csr" ? Verlet.Neighbors.MasterNeighborCSRList(skin; N=sys.natoms) : Verlet.Neighbors.MasterNeighborList(skin)
+        master_nl = storage == "csr" ?
+            Verlet.Neighbors.MasterNeighborCSRList(skin; N=sys.natoms) :
+            storage == "entries" ?
+                Verlet.Neighbors.MasterNeighborList(skin) :
+                storage == "verlet" ?
+                    Verlet.Neighbors.MasterNeighborVerletList(skin; N=sys.natoms) :
+                    error("Unknown storage=$storage")
 
         if OPTS["builder"] in ("all_pairs", "all")
             res = bench_case(sys, ff, master_nl; method=:all_pairs, samples=OPTS["samples"])
