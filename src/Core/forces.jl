@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# Implementation for basic force loop interface, e.g. Potential, forces!
-=======
 function compute_forces! end
 function compute_all_forces! end
 
@@ -22,4 +19,3 @@ function compute_all_forces!(sys::System, ff::ForceField)
         compute_forces!(interaction, sys)
     end
 end
->>>>>>> e020923 (fix all namespaces)

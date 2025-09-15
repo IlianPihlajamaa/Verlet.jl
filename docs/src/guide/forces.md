@@ -32,7 +32,7 @@ sys = System(
 rc = 2.5
 lj_pair = LJPair(ϵ, σ, rc)
 params = PairTable(fill(lj_pair, (1, 1)))
-exclusions = Tuple{T_int,T_int}[]
+exclusions = Tuple{T_Int,T_Int}[]
 lj = LennardJones(params, exclusions, 0.5)
 
 # 3. Create a ForceField

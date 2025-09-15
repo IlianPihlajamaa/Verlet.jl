@@ -24,37 +24,25 @@ end
 
 # Structs to hold the particle indices for each interaction
 # These are what will be stored in the System's specific_potentials list
-<<<<<<< HEAD
-struct Bond
-=======
 struct Bond{T<:AbstractBondPotential}
->>>>>>> e020923 (fix all namespaces)
     i::Int
     j::Int
-    potential::AbstractBondPotential
+    potential::T
 end
 
-<<<<<<< HEAD
-struct Angle
-=======
 struct Angle{T<:AbstractAnglePotential}
->>>>>>> e020923 (fix all namespaces)
     i::Int
     j::Int
     k::Int
-    potential::AbstractAnglePotential
+    potential::T
 end
 
-<<<<<<< HEAD
-struct Dihedral
-=======
 struct Dihedral{T<: AbstractDihedralPotential}
->>>>>>> e020923 (fix all namespaces)
     i::Int
     j::Int
     k::Int
     l::Int
-    potential::AbstractDihedralPotential
+    potential::T
 end
 
 # Potential energy and force implementations for bonded potentials

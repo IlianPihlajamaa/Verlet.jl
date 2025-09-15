@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-# This file is deprecated.
-# The new neighbor list implementation is in `src/Neighbors/master_nl.jl`
-# and the force field API is in `src/Core/forcefields.jl`.
-=======
 struct NeighborPair{F<:AbstractPotentialPair, IntT<:Integer}
     i::IntT
     j::IntT
@@ -28,4 +23,3 @@ function MasterNeighborList(skin::T; sizehint=1000) where T
     sizehint!(entries, sizehint)
     return MasterNeighborList(skin, entries)
 end
->>>>>>> e020923 (fix all namespaces)
