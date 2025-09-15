@@ -1,7 +1,9 @@
+# from root: julia --project=docs docs/make.jl
+
 using Documenter
 using Verlet
 
-DocMeta.setdocmeta!(Verlet, :DocTestSetup, :(using Verlet); recursive=true)
+# DocMeta.setdocmeta!(Verlet, :DocTestSetup, :(using Verlet); recursive=true)
 
 makedocs(
     sitename = "Verlet.jl",
