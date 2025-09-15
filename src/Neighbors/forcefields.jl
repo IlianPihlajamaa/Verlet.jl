@@ -1,4 +1,6 @@
 using StructArrays
+import ..Potentials
+import ..Core
 
 struct ForceField{ForcesTuple}
     layers::ForcesTuple
@@ -43,17 +45,21 @@ function build_all_neighbors!(master_nl::MasterNeighborList, ff::ForceField, sys
     end
 end
 
+using ..Core: Bond, Angle, Dihedral
+
 function compute_all_forces!(sys::System, ff::ForceField)
     # Reset forces before calculation
     fill!(sys.forces, zero(eltype(sys.forces)))
 
     # Pairwise forces from the force field layers
     for pot in ff.layers
-        compute_forces!(pot, sys)
+        Potentials.compute_forces!(pot, sys)
     end
 
     # Specific bonded forces
     for interaction in sys.specific_potentials
-        compute_forces!(interaction, sys)
+        if interaction isa Bond || interaction isa Angle || interaction isa Dihedral
+            Core.compute_forces!(interaction, sys)
+        end
     end
 end

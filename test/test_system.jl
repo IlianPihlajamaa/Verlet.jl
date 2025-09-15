@@ -1,6 +1,7 @@
 using Verlet
 using StaticArrays
 using Test
+using Verlet
 
 @testset "System struct" begin
     # 3D system

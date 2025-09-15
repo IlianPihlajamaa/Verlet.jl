@@ -1,0 +1,3 @@
+abstract type AbstractPotentialPair end
+abstract type AbstractPairPotential end
+abstract type AbstractBondPotential end

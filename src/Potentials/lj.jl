@@ -1,3 +1,5 @@
+using LinearAlgebra, StaticArrays
+
 mutable struct LennardJones{IntT<:Integer, T<:AbstractPotentialPair} <: AbstractPairPotential
     params::PairTable{T}
     exclusions::Vector{Tuple{IntT, IntT}}
