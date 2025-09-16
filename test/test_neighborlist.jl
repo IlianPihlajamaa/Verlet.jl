@@ -20,17 +20,16 @@ end
         L = 8.0
         sys = setup_test_system(N, D, L)
 
-        r_verlet = 2.5 + 0.4
-        master_nl = MasterNeighborList(0.4)
-        Verlet.Neighbors.build_master_neighborlist!(master_nl, sys.positions, sys.box; r_verlet=r_verlet, method=:cells)
+        skin = 0.4
+        r_verlet = 2.5 + skin
+        cutoff = r_verlet - skin
+        master_nl = MasterNeighborList(sys; cutoff=cutoff, skin=skin)
+        Verlet.Neighbors.build_master_neighborlist!(master_nl, sys; r_verlet=r_verlet, method=:cells)
 
-        # All neighbor pairs within r_verlet
-        for entry in master_nl.entries
-            i, j, r2 = entry.i, entry.j, entry.r2
-            Δ = sys.positions[i] - sys.positions[j]
-            Δ = minimum_image(Δ, sys.box)
-            @test dot(Δ,Δ) ≈ r2
-        end
+        ref_pairs = Verlet.Neighbors.brute_force_pairs(sys, r_verlet)
+        pairs = Set(Tuple(p) for p in master_nl.pairs)
+        ref = Set(Tuple(p) for p in ref_pairs)
+        @test pairs == ref
     end
 
     @testset "LJ forces with NeighborList match O(N²) reference" begin
@@ -44,7 +43,7 @@ end
         exclusions = Tuple{Int,Int}[]
         lj = LennardJones(params, exclusions, skin)
         ff = Verlet.Neighbors.ForceField((lj,))
-        master_nl = MasterNeighborList(skin)
+        master_nl = MasterNeighborList(sys; cutoff=rcut, skin=skin)
 
         Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=:cells)
         Verlet.Core.compute_all_forces!(sys, ff)
@@ -52,7 +51,7 @@ end
 
         U_nl = 0.0
         for pair_info in lj.neighborlist.neighbors
-            r2 = Verlet.Neighbors._squared_distance_min_image(sys.positions, pair_info.i, pair_info.j, sys.box)
+            r2 = Verlet.Neighbors.distance2_minimum_image(sys.positions[pair_info.i], sys.positions[pair_info.j], sys.box)
             if r2 < rcut^2
                 inv_r2 = 1 / r2
                 s2 = σ^2 * inv_r2

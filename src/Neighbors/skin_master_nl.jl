@@ -29,7 +29,7 @@ end
 end
 
 
-mutable struct MyNeighborList{D,T}
+mutable struct MasterNeighborList{D,T}
     cutoff::T
     cutoff2::T
     skin::T
@@ -44,15 +44,14 @@ mutable struct MyNeighborList{D,T}
     next::Vector{Int}
 end
 
-function Base.show(io::IO, nl:: MyNeighborList{D,T}) where {D,T}
+function Base.show(io::IO, nl:: MasterNeighborList{D,T}) where {D,T}
     print(io,
-        " MyNeighborList{$D,$(T)}(",
+        " MasterNeighborList{$D,$(T)}(",
         "pairs=", length(nl.pairs),
         ", cutoff=", nl.cutoff,
         ", skin=", nl.skin,
         ", nbuilds=", nl.nbuilds,
         ", cells=", nl.ncells,
-        ", use_cells=", nl.use_cells,
         ")")
 end
 
@@ -63,24 +62,29 @@ end
     return ntuple(d -> max(1, Int(floor(L / rskin))), 3)
 end
 
-function MyNeighborList( sys::System; cutoff::T, skin::T) where {T<:AbstractFloat}
-    _make_neighbor_list(sys, sys.box; cutoff, skin)
+function MasterNeighborList(sys::System; cutoff::T, skin::T) where {T<:AbstractFloat}
+    _make_neighbor_list(sys.positions, sys.box; cutoff, skin)
+end
+
+function MasterNeighborList(positions, box; cutoff::T, skin::T) where {T<:AbstractFloat}
+    _make_neighbor_list(positions, box; cutoff, skin)
 end
 
 # Main constructor specialized on Box{...,ORTHO}
 function _make_neighbor_list(
-    sys, box;
+    positions,
+    box;
     cutoff::T, skin::T
 ) where {T}
     cutoff2 = cutoff * cutoff
     rskin  = cutoff + skin
     rskin2 = rskin * rskin
 
-    N  = length(sys.positions)
-    D = length(sys.positions[1])
+    N  = length(positions)
+    D = length(positions[1])
     r0 = Vector{SVector{D,T}}(undef, N)
     @inbounds for i in 1:N
-        r0[i] = sys.positions[i]
+        r0[i] = positions[i]
     end
 
     ncells   =  _choose_cell_grid(box, rskin) 
@@ -92,10 +96,10 @@ function _make_neighbor_list(
     pairs = Vector{SVector{2,Int}}()
     sizehint!(pairs, max(16, 100N))
 
-    _build_pairs_cells!(pairs, head, next, sys, box, rskin)
+    _build_pairs_cells!(pairs, head, next, positions, box, rskin)
 
 
-    return  MyNeighborList{D,T}(
+    return  MasterNeighborList{D,T}(
         cutoff, cutoff2, skin, rskin2,
         pairs, r0, zero(T), 1, ncells, 
         head, next
@@ -103,36 +107,50 @@ function _make_neighbor_list(
 end
 
 
-function rebuild!(nl:: MyNeighborList{D,T}, sys, box) where {D,T}
+function rebuild!(nl::MasterNeighborList{D,T}, sys::System; method::Symbol=:cells, cutoff=nl.cutoff) where {D,T}
+    rebuild!(nl, sys.positions, sys.box; method, cutoff)
+end
+
+function rebuild!(nl::MasterNeighborList{D,T}, positions, box; method::Symbol=:cells, cutoff=nl.cutoff) where {D,T}
+    nl.cutoff = cutoff
+    nl.cutoff2 = cutoff * cutoff
     rskin = nl.cutoff + nl.skin
+    nl.rskin2 = rskin * rskin
 
-    # Resize/clear buffers if necessary
-    N = length(sys.positions)
-    ncells =  _choose_cell_grid(box, rskin)
-    nct = max(prod(ncells), 1)
-
-    if length(nl.head) != nct
-        resize!(nl.head, nct)
+    N = length(positions)
+    if length(nl.r0) != N
+        resize!(nl.r0, N)
     end
-    fill!(nl.head, 0)
 
-    if length(nl.next) != N
-        resize!(nl.next, N)
+    if method == :cells
+        ncells = _choose_cell_grid(box, rskin)
+        nct = max(prod(ncells), 1)
+        if length(nl.head) != nct
+            resize!(nl.head, nct)
+        end
+        fill!(nl.head, 0)
+        if length(nl.next) != N
+            resize!(nl.next, N)
+        end
+        empty!(nl.pairs)
+        nl.ncells = ncells
+        _build_pairs_cells!(nl.pairs, nl.head, nl.next, positions, box, rskin)
+    elseif method == :bruteforce
+        empty!(nl.pairs)
+        _build_pairs_bruteforce!(nl.pairs, positions, box, nl.rskin2)
+        nl.ncells = ntuple(_ -> 1, length(nl.ncells))
+    elseif method == :all_pairs
+        empty!(nl.pairs)
+        _build_pairs_allpairs!(nl.pairs, positions)
+        nl.ncells = ntuple(_ -> 1, length(nl.ncells))
+    else
+        error("Unknown neighborlist method: $method")
     end
-    empty!(nl.pairs)
 
-    # Update grid shape
-    nl.ncells = ncells
-
-    # Rebuild candidates in-place
-    _build_pairs_cells!(nl.pairs, nl.head, nl.next, sys, box, rskin)
-
-    # Reset reference frame & displacement tracker
-    @inbounds for i in eachindex(sys.positions)
-        nl.r0[i] = sys.positions[i]
+    @inbounds for i in eachindex(positions)
+        nl.r0[i] = positions[i]
     end
     nl.max_disp2 = zero(T)
-    nl.rskin2    = (nl.cutoff + nl.skin)^2
     nl.nbuilds  += 1
     return nl
 end
@@ -144,13 +162,13 @@ function _build_pairs_cells!(
     pairs::Vector{SVector{2,Int}},
     head::Vector{Int},
     next::Vector{Int},
-    sys,
+    positions,
     box,
     rskin::T
 ) where {T<:AbstractFloat}
     rskin2 = rskin * rskin
-    N = length(sys.positions)
-    D = length(sys.positions[1])
+    N = length(positions)
+    D = length(positions[1])
     nc = _choose_cell_grid(box, rskin)
     @assert prod(nc) == length(head) "head buffer size mismatch."
 
@@ -158,7 +176,7 @@ function _build_pairs_cells!(
 
     # Assign particles to cells (0-based per-dim indices) using fractional coords
     @inbounds for i in 1:N
-        ri = sys.positions[i]
+        ri = positions[i]
         sS = fractional(box, ri)              # SVector
         s  = MVector{D,T}(undef)
         @inbounds for d in 1:D; s[d] = sS[d]; end
@@ -194,7 +212,7 @@ function _build_pairs_cells!(
             if !seen; nuniq += 1; uniq[nuniq] = lidB; end
         end
         @inbounds for t in 1:nuniq
-            _accumulate_cell_pairs!(pairs, head, next, lidA, uniq[t], sys, box, rskin2)
+            _accumulate_cell_pairs!(pairs, head, next, lidA, uniq[t], positions, box, rskin2)
         end
     end
 
@@ -202,13 +220,13 @@ function _build_pairs_cells!(
 end
 
 # Accumulate i<j pairs from cell A vs cell B, testing against rskin2
-@inline function _accumulate_cell_pairs!(pairs, head, next, lidA::Int, lidB::Int, sys, box, rskin2)
+@inline function _accumulate_cell_pairs!(pairs, head, next, lidA::Int, lidB::Int, positions, box, rskin2)
     i = head[lidA]
     if lidA == lidB
         @inbounds while i != 0
-            j = next[i]; ri = sys.positions[i]
+            j = next[i]; ri = positions[i]
             while j != 0
-                r2 = distance2_minimum_image(ri, sys.positions[j], box)
+                r2 = distance2_minimum_image(ri, positions[j], box)
                 if r2 <= rskin2
                     push!(pairs, ifelse(i<j, SVector(i, j), SVector(j,i)))
                 end
@@ -218,9 +236,9 @@ end
         end
     else
         @inbounds while i != 0
-            j = head[lidB]; ri = sys.positions[i]
+            j = head[lidB]; ri = positions[i]
             while j != 0
-                r2 = distance2_minimum_image(ri, sys.positions[j], box)
+                r2 = distance2_minimum_image(ri, positions[j], box)
                 if r2 <= rskin2
                     if i>j
                         push!(pairs, SVector(j,i))
@@ -234,6 +252,54 @@ end
         end
     end
     return nothing
+end
+
+@inline function _build_pairs_bruteforce!(pairs::Vector{SVector{2,Int}}, positions, box, rskin2)
+    N = length(positions)
+    @inbounds for i in 1:max(N - 1, 0)
+        ri = positions[i]
+        for j in i+1:N
+            r2 = distance2_minimum_image(ri, positions[j], box)
+            if r2 <= rskin2
+                push!(pairs, SVector(i, j))
+            end
+        end
+    end
+    return pairs
+end
+
+@inline function _build_pairs_allpairs!(pairs::Vector{SVector{2,Int}}, positions)
+    N = length(positions)
+    @inbounds for i in 1:max(N - 1, 0)
+        for j in i+1:N
+            push!(pairs, SVector(i, j))
+        end
+    end
+    return pairs
+end
+
+function brute_force_pairs(positions, box, cutoff)
+    pairs = Vector{SVector{2,Int}}()
+    _build_pairs_bruteforce!(pairs, positions, box, cutoff * cutoff)
+    return pairs
+end
+
+@inline function brute_force_pairs(sys::System, cutoff)
+    brute_force_pairs(sys.positions, sys.box, cutoff)
+end
+
+function build_master_neighborlist!(nl::MasterNeighborList{D,T}, sys::System; r_verlet::Real, method::Symbol=:cells) where {D,T}
+    build_master_neighborlist!(nl, sys.positions, sys.box; r_verlet, method)
+end
+
+function build_master_neighborlist!(nl::MasterNeighborList{D,T}, positions, box; r_verlet::Real, method::Symbol=:cells) where {D,T}
+    if method === :all_pairs
+        rebuild!(nl, positions, box; method=:all_pairs, cutoff=convert(T, r_verlet))
+    else
+        rskin = convert(T, r_verlet)
+        cutoff = max(zero(T), rskin - nl.skin)
+        rebuild!(nl, positions, box; method=method, cutoff=cutoff)
+    end
 end
 
 @inline function displacement(ri::SVector{3,T}, rj::SVector{3,T}, box) where {T}
@@ -261,4 +327,3 @@ end
     dr = displacement(ri, rj, box)
     dot(dr, dr)
 end
-

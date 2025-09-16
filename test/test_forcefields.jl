@@ -32,7 +32,7 @@ end
     ff = Verlet.Neighbors.ForceField((lj,))
 
     master_skin = 0.5
-    master_nl = MasterNeighborList(master_skin)
+    master_nl = MasterNeighborList(sys; cutoff=rc, skin=master_skin)
 
     for method in [:cells, :bruteforce, :all_pairs]
         Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=method)
@@ -92,7 +92,7 @@ end
     ff = Verlet.Neighbors.ForceField((coul,))
 
     master_skin = 0.5
-    master_nl = MasterNeighborList(master_skin)
+    master_nl = MasterNeighborList(sys; cutoff=rc, skin=master_skin)
 
     for method in [:cells, :bruteforce, :all_pairs]
         Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=method)

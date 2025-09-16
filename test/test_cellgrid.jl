@@ -40,8 +40,8 @@ using Random
         wrap_positions!(R, box)
 
         cutoff, skin = 2.2, 0.5
-        r_verlet = cutoff
-        master_nl = MasterNeighborList(skin)
+        r_verlet = cutoff + skin
+        master_nl = MasterNeighborList(R, box; cutoff=cutoff, skin=skin)
         build_master_neighborlist!(master_nl, R, box; r_verlet=r_verlet, method=:cells)
 
         rlist2 = (cutoff + skin)^2
@@ -55,7 +55,7 @@ using Random
         end
         sort!(ref_pairs)
 
-        got_pairs = [(p.i, p.j) for p in master_nl.entries]
+        got_pairs = [Tuple(p) for p in master_nl.pairs]
         sort!(got_pairs)
 
         @test got_pairs == ref_pairs
