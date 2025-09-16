@@ -32,7 +32,7 @@ end
 
 # 4. Run the simulation
 dt = 0.1
-master_nl = Verlet.Neighbors.MasterNeighborList(0.5)
+master_nl = Verlet.Neighbors.MasterNeighborList(sys; cutoff=rc, skin=0.5)
 # Wrap the force function to match the integrator&#39;s signature
 force_wrapper(R) = compute_forces_for_integrator(R, sys, ff, master_nl)
 Verlet.Core.velocity_verlet!(sys, force_wrapper, dt)
@@ -101,8 +101,9 @@ sys = System(
 )
 
 # 2. Define a Lennard-Jones potential
+rc = 2.5
 lj = Verlet.Potentials.LennardJones(
-    Verlet.Potentials.PairTable(fill(Verlet.Potentials.LJPair(1.0, 1.0, 2.5), (1, 1))),
+    Verlet.Potentials.PairTable(fill(Verlet.Potentials.LJPair(1.0, 1.0, rc), (1, 1))),
     Tuple{Verlet.Core.T_Int,Verlet.Core.T_Int}[],
     0.5
 )
@@ -112,15 +113,16 @@ ff = Verlet.Neighbors.ForceField((lj,))
 
 # 4. Build neighbor lists and compute forces
 master_skin = 0.5
-master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
+master_nl = Verlet.Neighbors.MasterNeighborList(sys; cutoff=rc, skin=master_skin)
 Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys)
 Verlet.Neighbors.compute_all_forces!(sys, ff)
 
 @show sys.forces[1]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3-element StaticArraysCore.SVector{3, Float64} with indices SOneTo(3):
-      1.719510974006877e6
- 435944.4779188721
-     -3.150487944505995e6</code></pre><h3 id="Neighbor-List-Methods"><a class="docs-heading-anchor" href="#Neighbor-List-Methods">Neighbor List Methods</a><a id="Neighbor-List-Methods-1"></a><a class="docs-heading-anchor-permalink" href="#Neighbor-List-Methods" title="Permalink"></a></h3><p>You can choose the neighbor list algorithm with the <code>method</code> keyword in <code>build_all_neighbors!</code>:</p><ul><li><code>:cells</code> (default): Fast <code>O(N)</code> cell-based algorithm.</li><li><code>:bruteforce</code>: Slower <code>O(N^2)</code> algorithm for debugging.</li><li><code>:all_pairs</code>: Includes all pairs, ignoring cutoffs.</li></ul><pre><code class="language-julia hljs">master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
-Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)</code></pre><ul><li><a href="api/#Verlet.Neighbors.build_master_neighborlist!-Tuple{MasterNeighborList, AbstractVector, CubicBox}"><code>build_master_neighborlist!</code></a> — construct a new master neighbor list.</li><li><a href="api/#Verlet.Core.wrap_positions!-Union{Tuple{T}, Tuple{Dims}, Tuple{Array{StaticArraysCore.SVector{Dims, T}, 1}, CubicBox{T}}} where {Dims, T&lt;:AbstractFloat}"><code>wrap_positions!</code></a> — enforce periodic wrapping of coordinates.</li></ul><h1 id="Wrap-the-force-function-to-match-the-integrator&#39;s-signature"><a class="docs-heading-anchor" href="#Wrap-the-force-function-to-match-the-integrator&#39;s-signature">Wrap the force function to match the integrator&#39;s signature</a><a id="Wrap-the-force-function-to-match-the-integrator&#39;s-signature-1"></a><a class="docs-heading-anchor-permalink" href="#Wrap-the-force-function-to-match-the-integrator&#39;s-signature" title="Permalink"></a></h1><p>force<em>wrapper(R) = compute</em>forces<em>for</em>integrator(R, sys, ff) velocity<em>verlet!(sys, force</em>wrapper, dt) sys.positions</p><pre><code class="nohighlight hljs">
+ -5.020241684175363e10
+ -1.689575856722974e11
+  4.19928482775045e11</code></pre><h3 id="Neighbor-List-Methods"><a class="docs-heading-anchor" href="#Neighbor-List-Methods">Neighbor List Methods</a><a id="Neighbor-List-Methods-1"></a><a class="docs-heading-anchor-permalink" href="#Neighbor-List-Methods" title="Permalink"></a></h3><p>You can choose the neighbor list algorithm with the <code>method</code> keyword in <code>build_all_neighbors!</code>:</p><ul><li><code>:cells</code> (default): Fast <code>O(N)</code> cell-based algorithm.</li><li><code>:bruteforce</code>: Slower <code>O(N^2)</code> algorithm for debugging.</li><li><code>:all_pairs</code>: Includes all pairs, ignoring cutoffs.</li></ul><pre><code class="language-julia hljs">rc = 2.5
+master_nl = Verlet.Neighbors.MasterNeighborList(sys; cutoff=rc, skin=master_skin)
+Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)</code></pre><ul><li><a href="api/#Verlet.Neighbors.build_master_neighborlist!-Union{Tuple{T}, Tuple{D}, Tuple{MasterNeighborList{D, T}, System}} where {D, T}"><code>build_master_neighborlist!</code></a> — construct a new master neighbor list.</li><li><a href="api/#Verlet.Core.wrap_positions!-Union{Tuple{T}, Tuple{Dims}, Tuple{Array{StaticArraysCore.SVector{Dims, T}, 1}, CubicBox{T}}} where {Dims, T&lt;:AbstractFloat}"><code>wrap_positions!</code></a> — enforce periodic wrapping of coordinates.</li></ul><h1 id="Wrap-the-force-function-to-match-the-integrator&#39;s-signature"><a class="docs-heading-anchor" href="#Wrap-the-force-function-to-match-the-integrator&#39;s-signature">Wrap the force function to match the integrator&#39;s signature</a><a id="Wrap-the-force-function-to-match-the-integrator&#39;s-signature-1"></a><a class="docs-heading-anchor-permalink" href="#Wrap-the-force-function-to-match-the-integrator&#39;s-signature" title="Permalink"></a></h1><p>force<em>wrapper(R) = compute</em>forces<em>for</em>integrator(R, sys, ff) velocity<em>verlet!(sys, force</em>wrapper, dt) sys.positions</p><pre><code class="nohighlight hljs">
 ## Next Steps
 
 Check out the \[Guide → Constrained Dynamics](@ref constraints-guide) section to learn how to:
@@ -155,4 +157,4 @@ You can choose the neighbor list algorithm with the `method` keyword in `build_a
 * [Numerical Notes](@ref) — guidance on tolerances, thermostat interaction, and reproducibility
 
 ---
-</code></pre><p>@contents Pages = [&quot;constraints.md&quot;, &quot;numerics.md&quot;, &quot;api.md&quot;] Depth = 2</p><pre><code class="nohighlight hljs"></code></pre><p>@index Pages = [&quot;api.md&quot;] ```</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="guide/constraints/">Constrained Dynamics »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.14.1 on <span class="colophon-date" title="Monday 15 September 2025 21:09">Monday 15 September 2025</span>. Using Julia version 1.11.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+</code></pre><p>@contents Pages = [&quot;constraints.md&quot;, &quot;numerics.md&quot;, &quot;api.md&quot;] Depth = 2</p><pre><code class="nohighlight hljs"></code></pre><p>@index Pages = [&quot;api.md&quot;] ```</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="guide/constraints/">Constrained Dynamics »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.14.1 on <span class="colophon-date" title="Tuesday 16 September 2025 11:36">Tuesday 16 September 2025</span>. Using Julia version 1.11.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
