@@ -27,8 +27,17 @@ end
     end
     return id
 end
+"""
+    MasterNeighborList{D,T}
 
+Master Verlet neighbor list storing unique `(i, j)` candidates within
+`cutoff + skin` for a `D`-dimensional periodic system. The list retains
+buffers used by the cell-linked builder so repeated rebuilds avoid
+allocations.
 
+Create instances via [`MasterNeighborList(sys; cutoff, skin)`](@ref) or
+[`MasterNeighborList(positions, box; cutoff, skin)`](@ref).
+"""
 mutable struct MasterNeighborList{D,T}
     cutoff::T
     cutoff2::T
@@ -288,6 +297,22 @@ end
     brute_force_pairs(sys.positions, sys.box, cutoff)
 end
 
+"""
+    build_master_neighborlist!(nl::MasterNeighborList, sys::System; r_verlet, method=:cells)
+    build_master_neighborlist!(nl::MasterNeighborList, positions, box; r_verlet, method=:cells)
+
+Update a [`MasterNeighborList`](@ref) in-place so that it contains all candidate
+`(i, j)` pairs consistent with the requested Verlet radius `r_verlet`.
+
+`method` chooses the builder:
+
+* `:cells` (default) uses the cell-linked list sweep and is `O(N)` for large systems.
+* `:bruteforce` walks all `i<j` pairs (`O(N^2)`), useful for debugging and validation.
+* `:all_pairs` stores every `(i, j)` combination regardless of the cutoff.
+
+The list's `cutoff` is updated to `max(zero(typeof(nl.cutoff)), r_verlet - nl.skin)`
+so that the stored `pairs` are within `cutoff + skin`. Returns `nl`.
+"""
 function build_master_neighborlist!(nl::MasterNeighborList{D,T}, sys::System; r_verlet::Real, method::Symbol=:cells) where {D,T}
     build_master_neighborlist!(nl, sys.positions, sys.box; r_verlet, method)
 end

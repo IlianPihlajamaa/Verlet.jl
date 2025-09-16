@@ -64,8 +64,7 @@ sys = System(R, fill(@SVector zeros(3),64), fill(@SVector zeros(3),64), ones(64)
 params = PairTable(fill(LJPair(1.0, 1.0, 2.5), (1,1)))
 lj = LennardJones(params, Tuple{Int,Int}[], 0.5)
 ff = Verlet.Neighbors.ForceField((lj,))
-master = Verlet.Neighbors.MasterNeighborList(0.5)
+master = Verlet.Neighbors.MasterNeighborList(sys; cutoff=2.5, skin=0.5)
 Verlet.Neighbors.build_all_neighbors!(master, ff, sys)
 Verlet.Neighbors.compute_all_forces!(sys, ff)
 ```
-

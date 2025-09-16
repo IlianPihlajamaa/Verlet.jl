@@ -40,7 +40,7 @@ ff = Verlet.Neighbors.ForceField((lj,))
 
 # 4. Build neighbor lists and compute forces
 master_skin = 0.5
-master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
+master_nl = Verlet.Neighbors.MasterNeighborList(sys; cutoff=rc, skin=master_skin)
 Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys)
 Verlet.Neighbors.compute_all_forces!(sys, ff)
 
@@ -69,7 +69,7 @@ The `build_all_neighbors!` function uses a master neighbor list to accelerate fo
 Here's how to use it:
 
 ```julia
-# master_nl = MasterNeighborList(master_skin)
+# master_nl = MasterNeighborList(sys; cutoff=rc, skin=master_skin)
 # build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)
 ```
 

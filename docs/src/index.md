@@ -42,7 +42,7 @@ end
 
 # 4. Run the simulation
 dt = 0.1
-master_nl = Verlet.Neighbors.MasterNeighborList(0.5)
+master_nl = Verlet.Neighbors.MasterNeighborList(sys; cutoff=rc, skin=0.5)
 # Wrap the force function to match the integrator's signature
 force_wrapper(R) = compute_forces_for_integrator(R, sys, ff, master_nl)
 Verlet.Core.velocity_verlet!(sys, force_wrapper, dt)
@@ -134,8 +134,9 @@ sys = System(
 )
 
 # 2. Define a Lennard-Jones potential
+rc = 2.5
 lj = Verlet.Potentials.LennardJones(
-    Verlet.Potentials.PairTable(fill(Verlet.Potentials.LJPair(1.0, 1.0, 2.5), (1, 1))),
+    Verlet.Potentials.PairTable(fill(Verlet.Potentials.LJPair(1.0, 1.0, rc), (1, 1))),
     Tuple{Verlet.Core.T_Int,Verlet.Core.T_Int}[],
     0.5
 )
@@ -145,7 +146,7 @@ ff = Verlet.Neighbors.ForceField((lj,))
 
 # 4. Build neighbor lists and compute forces
 master_skin = 0.5
-master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
+master_nl = Verlet.Neighbors.MasterNeighborList(sys; cutoff=rc, skin=master_skin)
 Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys)
 Verlet.Neighbors.compute_all_forces!(sys, ff)
 
@@ -160,7 +161,8 @@ You can choose the neighbor list algorithm with the `method` keyword in `build_a
 - `:all_pairs`: Includes all pairs, ignoring cutoffs.
 
 ```julia
-master_nl = Verlet.Neighbors.MasterNeighborList(master_skin)
+rc = 2.5
+master_nl = Verlet.Neighbors.MasterNeighborList(sys; cutoff=rc, skin=master_skin)
 Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)
 ```
 
