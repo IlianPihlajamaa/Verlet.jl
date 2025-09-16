@@ -9,6 +9,7 @@ using Verlet
         r0 = 1.0
         positions = [@SVector zeros(D) for _ in 1:N]
         positions[2] = @SVector [r0, 0.0, 0.0]
+        N = length(positions)
         velocities = [@SVector zeros(D) for _ in 1:N]
         forces = [@SVector zeros(D) for _ in 1:N]
         masses = ones(N)
@@ -79,5 +80,46 @@ using Verlet
         @test rmsC == 0.0
         @test maxCd == 0.0
         @test rmsCd == 0.0
+    end
+
+    @testset "integrate! matches manual constrained BAOAB" begin
+        D = 3
+        positions = [
+            @SVector([0.0, 0.0, 0.0]),
+            @SVector([1.0, 0.0, 0.0]),
+            @SVector([0.0, 1.0, 0.0]),
+            @SVector([0.0, 0.0, 1.0]),
+        ]
+        N = length(positions)
+        velocities = [@SVector zeros(D) for _ in 1:N]
+        forces = [@SVector zeros(D) for _ in 1:N]
+        masses = ones(N)
+        box = CubicBox(8.0)
+        types = ones(Int, N)
+        type_names = Dict(1 => :A)
+        sys1 = System(deepcopy(positions), deepcopy(velocities), deepcopy(forces), deepcopy(masses), box, types, type_names)
+        sys2 = deepcopy(sys1)
+        cons1 = DistanceConstraints([(1,2)], [1.0])
+        cons2 = DistanceConstraints([(1,2)], [1.0])
+        forces_func(R) = [@SVector zeros(D) for _ in R]
+        dt, γ, T = 0.005, 1.5, 0.8
+        rng = MersenneTwister(2024)
+        steps = 7
+
+        Random.seed!(2024)
+        integrate!(langevin_baoab_constrained!, sys1, forces_func, dt, steps, cons1; γ=γ, temp=T, rng=rng)
+        Random.seed!(2024)
+        for _ in 1:steps
+            langevin_baoab_constrained!(sys2, forces_func, dt, cons2; γ=γ, temp=T, rng=rng)
+        end
+
+        pos_err = maximum(norm.(sys1.positions .- sys2.positions))
+        vel_err = maximum(norm.(sys1.velocities .- sys2.velocities))
+        @test pos_err ≤ 1e-10
+        @test vel_err ≤ 1e-10
+
+        res = constraint_residuals(sys1, cons1)
+        @test res.maxC ≤ 1e-8
+        @test res.maxCd ≤ 1e-8
     end
 end

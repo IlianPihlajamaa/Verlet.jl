@@ -64,6 +64,9 @@ Purpose: Core particle system types, math utilities, simple integrators, and for
 - `velocity_verlet!(system::System{T}, forces::Function, dt::T)`
   - Two half kicks with a position drift; evaluates `forces(R)` twice.
   - `forces(::Vector{SVector})` must return force vectors matching positions.
+- `integrate!(integrator!, system::System, forces, dt, nsteps[, args...]; callback=nothing, kwargs...)`
+  - Repeatedly applies `integrator!` for `nsteps`; accepts extra positional/keyword arguments.
+  - Invokes `callback(system, step)` after each step when provided; returning `false` stops.
 - `potential_energy(system::System{T}, forces::Function) -> T`
   - Expects `forces(R; return_potential=true) => (F, U)`; errors if unsupported.
 
@@ -86,4 +89,3 @@ R = [@SVector randn(3) for _ in 1:4]; wrap_positions!(R, box)
 sys = System(R, fill(@SVector zeros(3), 4), fill(@SVector zeros(3), 4), ones(4), box, ones(Int,4), Dict(1=>:A))
 velocity_verlet!(sys, R -> [ -r for r in R ], 0.001)
 ```
-

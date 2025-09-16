@@ -17,6 +17,35 @@ function velocity_verlet!(system::System{T,IT,Dims}, forces::Function, dt::T) wh
 end
 
 """
+    integrate!(integrator!, system::System, forces, dt, nsteps[, args...]; callback=nothing, kwargs...)
+
+Repeatedly apply `integrator!` to `system` for `nsteps` steps.
+
+- `integrator!` is invoked as `integrator!(system, forces, dt, args...; kwargs...)`.
+- `callback`, if provided, is called after each step with `(system, step)`; returning
+  `false` stops the loop early.
+- `nsteps` must be a non-negative integer. When `nsteps == 0`, the system is returned
+  unchanged and the callback is not invoked.
+"""
+function integrate!(integrator!, system::System, forces, dt, nsteps::Integer, args...; callback=nothing, kwargs...)
+    nsteps < 0 && throw(ArgumentError("nsteps must be non-negative, got $nsteps"))
+    nsteps == 0 && return system
+
+    if callback === nothing
+        for _ in 1:nsteps
+            integrator!(system, forces, dt, args...; kwargs...)
+        end
+    else
+        for step in 1:nsteps
+            integrator!(system, forces, dt, args...; kwargs...)
+            callback(system, step) === false && break
+        end
+    end
+
+    return system
+end
+
+"""
     potential_energy(system::System{T,IT,Dims}, forces::Function) -> T
 
 Try to obtain total potential energy using `forces(...; return_potential=true)` convention.

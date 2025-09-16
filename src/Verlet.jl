@@ -16,7 +16,7 @@ include("Thermostats/Thermostats.jl")
 using .Thermostats
 
 # Re-export from Core
-export System, natoms, natomtypes, AbstractBox, velocity_verlet!, potential_energy, kinetic_energy
+export System, natoms, natomtypes, AbstractBox, velocity_verlet!, integrate!, potential_energy, kinetic_energy
 export CubicBox, minimum_image, wrap_positions!, box_length
 export T_Float, T_Int, Dims
 export NeighborPair, PotentialNeighborList, MasterNeighborList

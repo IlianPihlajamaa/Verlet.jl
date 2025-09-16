@@ -45,7 +45,7 @@ dt = 0.1
 master_nl = Verlet.Neighbors.MasterNeighborList(sys; cutoff=rc, skin=0.5)
 # Wrap the force function to match the integrator's signature
 force_wrapper(R) = compute_forces_for_integrator(R, sys, ff, master_nl)
-Verlet.Core.velocity_verlet!(sys, force_wrapper, dt)
+integrate!(velocity_verlet!, sys, force_wrapper, dt, 1)
 sys.positions
 ```
 
@@ -73,9 +73,7 @@ type_names = Dict(1 => :A)
 sys = System(positions, velocities, forces, masses, box, types, type_names)
 
 dt = 0.1
-for _ in 1:100
-    velocity_verlet!(sys, ho_forces, dt)
-end
+integrate!(velocity_verlet!, sys, ho_forces, dt, 100)
 
 (pot = ho_forces(sys.positions, return_potential=true)[2])
 ```
@@ -103,10 +101,11 @@ sys = System(positions, velocities, forces, masses, box, types, type_names)
 dt = 0.05
 
 energies = Float64[]
-for _ in 1:200
-    velocity_verlet!(sys, ho_forces, dt)
-    push!(energies, ho_forces(sys.positions, return_potential=true)[2]) # kinetic_energy removed
-end
+integrate!(velocity_verlet!, sys, ho_forces, dt, 200;
+           callback = (sys, step) -> begin
+               push!(energies, ho_forces(sys.positions, return_potential=true)[2]) # kinetic_energy removed
+               return nothing
+           end)
 
 (round(minimum(energies), digits=6), round(maximum(energies), digits=6))
 ```
@@ -172,8 +171,12 @@ Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)
 
 # Wrap the force function to match the integrator's signature
 force_wrapper(R) = compute_forces_for_integrator(R, sys, ff)
-velocity_verlet!(sys, force_wrapper, dt)
+integrate!(velocity_verlet!, sys, force_wrapper, dt, 1)
 sys.positions
+
+# Run multiple steps with optional monitoring
+integrate!(velocity_verlet!, sys, force_wrapper, dt, 10;
+           callback = (sys, step) -> nothing)
 ```
 
 ## Next Steps
@@ -182,67 +185,6 @@ Check out the \[Guide → Constrained Dynamics](@ref constraints-guide) section 
 
 - Set up bond constraints with [`DistanceConstraints`](@ref)
 - Run constrained dynamics with [`velocity_verlet_shake_rattle!`](@ref)
-
-
-## Harmonic oscillator
-
-```@example ho
-using Verlet, StaticArrays, LinearAlgebra
-
-# Hooke's law with k = 1, potential U = 0.5 * |r|^2
-function ho_forces(R; return_potential=false)
-    F = [-r for r in R]
-    U = 0.5 * sum(norm(r)^2 for r in R)
-    return return_potential ? (F, U) : F
-end
-
-positions = [@SVector [1.0, 0.0, 0.0]]
-velocities = [@SVector [0.0, 0.0, 0.0]]
-forces = [@SVector [0.0, 0.0, 0.0]]
-masses = [1.0]
-box = CubicBox(10.0)
-types = [1]
-type_names = Dict(1 => :A)
-sys = System(positions, velocities, forces, masses, box, types, type_names)
-
-dt = 0.1
-for _ in 1:100
-    velocity_verlet!(sys, ho_forces, dt)
-end
-
-(pot = ho_forces(sys.positions, return_potential=true)[2])
-```
-
-## Energy monitoring
-
-
-```@example energy
-using Verlet, StaticArrays, LinearAlgebra
-
-function ho_forces(R; return_potential=false)
-    F = [-r for r in R]
-    U = 0.5 * sum(norm(r)^2 for r in R)
-    return return_potential ? (F, U) : F
-end
-
-positions = [@SVector [1.0, 0.0, 0.0]]
-velocities = [@SVector [0.0, 1.0, 0.0]]
-forces = [@SVector [0.0, 0.0, 0.0]]
-masses = [1.0]
-box = CubicBox(10.0)
-types = [1]
-type_names = Dict(1 => :A)
-sys = System(positions, velocities, forces, masses, box, types, type_names)
-dt = 0.05
-
-energies = Float64[]
-for _ in 1:200
-    velocity_verlet!(sys, ho_forces, dt)
-    push!(energies, ho_forces(sys.positions, return_potential=true)[2]) # kinetic_energy removed
-end
-
-(round(minimum(energies), digits=6), round(maximum(energies), digits=6))
-```
 
 
 ## ForceField API for Potentials
