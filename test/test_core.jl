@@ -133,6 +133,36 @@ const Dims = 3
         end
     end
 
+    @testset "Supports arbitrary spatial dimension" begin
+        D2 = 2
+        positions2 = [SVector{D2,Float64}(0.25, -0.4), SVector{D2,Float64}(-1.1, 0.9)]
+        velocities2 = [SVector{D2,Float64}(0.3, 0.1), SVector{D2,Float64}(-0.2, 0.05)]
+        forces2 = [SVector{D2,Float64}(0.0, 0.0) for _ in 1:2]
+        masses2 = [1.0, 2.0]
+        box2 = CubicBox(4.0)
+        types2 = [1, 1]
+        type_names2 = Dict(1 => :A)
+        sys2 = System(positions2, velocities2, forces2, masses2, box2, types2, type_names2)
+        wrap_positions!(sys2.positions, sys2.box)
+        forces_func2(R) = map(r -> -r, R)
+        integrate!(velocity_verlet!, sys2, forces_func2, 0.02, 10)
+        @test length(sys2.positions[1]) == D2
+        @test all(isfinite, first(sys2.positions))
+
+        D4 = 4
+        positions4 = [SVector{D4,Float64}(ntuple(i -> 0.1 * i, D4)...)]
+        velocities4 = [zero(SVector{D4,Float64})]
+        forces4 = [zero(SVector{D4,Float64})]
+        masses4 = [1.0]
+        box4 = CubicBox(6.0)
+        types4 = [1]
+        type_names4 = Dict(1 => :A)
+        sys4 = System(positions4, velocities4, forces4, masses4, box4, types4, type_names4)
+        wrap_positions!(sys4.positions, sys4.box)
+        integrate!(velocity_verlet!, sys4, forces_func2, 0.01, 1)
+        @test length(sys4.positions[1]) == D4
+    end
+
     @testset "Velocity Verlet energy conservation" begin
         function ho_forces(R; return_potential::Bool=false)
             F = [-r for r in R]

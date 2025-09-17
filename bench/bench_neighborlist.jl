@@ -19,7 +19,7 @@ using Printf
 # ----------------------------
 function parse_args(args::Vector{String})
     opts = Dict{String,Any}(
-        "N" => [128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 100000],
+        "N" => 10 .^ (2:6),  # list of system sizes
         "D" => 3,
         "rho" => 1.0,
         "rcut" => 1.25,
@@ -115,6 +115,7 @@ println("Params: D=$(OPTS["D"]), rho=$(OPTS["rho"]), rcut=$(OPTS["rcut"]), skin=
 
 
 
+println(rpad("N", 22), rpad("avg_deg", 16), rpad("build", 14), rpad("force(NL)", 14))
 
 for N in OPTS["N"]
     D   = OPTS["D"]
@@ -140,12 +141,10 @@ for N in OPTS["N"]
         t_build = ns(res.build_trial)
         t_force = ns(res.force_trial)
 
-        println("=== N=$N (all_pairs) ===")
-        println(rpad("avg_deg", 16), rpad("build", 14), rpad("force(NL)", 14))
-        println(rpad(@sprintf("%.2f", res.avg_deg), 16),
+        println(rpad("N=$N (all_pairs)", 22),
+                rpad(@sprintf("%.2f", res.avg_deg), 16),
                 rpad(fmt_ns(t_build), 14),
                 rpad(fmt_ns(t_force), 14))
-        println()
     end
 
     if OPTS["builder"] in ("cells", "all")
@@ -153,12 +152,10 @@ for N in OPTS["N"]
         t_build = ns(res.build_trial)
         t_force = ns(res.force_trial)
 
-        println("=== N=$N (cells) ===")
-        println(rpad("avg_deg", 16), rpad("build", 14), rpad("force(NL)", 14))
-        println(rpad(@sprintf("%.2f", res.avg_deg), 16),
+        println(rpad("N=$N (cells)", 22),
+                rpad(@sprintf("%.2f", res.avg_deg), 16),
                 rpad(fmt_ns(t_build), 14),
                 rpad(fmt_ns(t_force), 14))
-        println()
     end
 
     if OPTS["builder"] in ("brute_force", "all")
@@ -166,11 +163,31 @@ for N in OPTS["N"]
         t_build = ns(res.build_trial)
         t_force = ns(res.force_trial)
 
-        println("=== N=$N (bruteforce) ===")
-        println(rpad("avg_deg", 16), rpad("build", 14), rpad("force(NL)", 14))
-        println(rpad(@sprintf("%.2f", res.avg_deg), 16),
+        println(rpad("N=$N (bruteforce)", 22),
+                rpad(@sprintf("%.2f", res.avg_deg), 16),
                 rpad(fmt_ns(t_build), 14),
                 rpad(fmt_ns(t_force), 14))
-        println()
     end
 end
+
+
+## laptop
+# Params: D=3, rho=1.0, rcut=1.25, skin=0.4, samples=10, potential=false, builder=cells
+
+# N                     avg_deg         build         force(NL)     
+# N=100 (cells)         9.33            59.600 μs     9.100 μs      
+# N=1000 (cells)        9.44            764.000 μs    144.900 μs    
+# N=10000 (cells)       9.38            7.847 ms      1.698 ms      
+# N=100000 (cells)      9.40            90.758 ms     19.574 ms     
+# N=1000000 (cells)     9.41            1.495 s       372.285 ms
+
+## phys-computee006
+
+# Params: D=3, rho=1.0, rcut=1.25, skin=0.4, samples=10, potential=false, builder=cells
+
+# N                     avg_deg         build         force(NL)     
+# N=100 (cells)         9.33            94.245 μs     13.264 μs     
+# N=1000 (cells)        9.44            1.326 ms      199.467 μs    
+# N=10000 (cells)       9.38            13.805 ms     2.136 ms      
+# N=100000 (cells)      9.40            158.474 ms    22.870 ms     
+# N=1000000 (cells)     9.41            1.776 s       264.127 ms

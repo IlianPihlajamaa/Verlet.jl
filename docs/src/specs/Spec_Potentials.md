@@ -37,7 +37,7 @@ Purpose: Define concrete interatomic potentials and per-pair parameter tables; i
 - Force implementations
   - `compute_forces!(bond::Bond, system)` harmonic stretch along bond axis.
   - `compute_forces!(angle::Angle, system)` harmonic deviation of angle at `j`.
-  - `compute_forces!(dihedral::Dihedral, system)` periodic torsion per OpenMM formulas.
+  - `compute_forces!(dihedral::Dihedral, system)` periodic torsion per OpenMM formulas (throws when `system` has `Dims ≠ 3`).
 
 ## Integration with `Core.ForceField`
 

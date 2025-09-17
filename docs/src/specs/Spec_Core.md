@@ -6,7 +6,7 @@ Purpose: Core particle system types, math utilities, simple integrators, and for
 
 - `T_Float = Float64`: Default floating type for numeric fields.
 - `T_Int = Int64`: Default integer type for indices/types.
-- `Dims = 3`: Default spatial dimensionality.
+- `Dims = 3`: Default spatial dimensionality (APIs accept any `D`).
 
 ## Boxes
 
@@ -16,7 +16,7 @@ Purpose: Core particle system types, math utilities, simple integrators, and for
   - `box_length(box::CubicBox) -> T`
   - `minimum_image(Δ::AbstractVector, box::CubicBox)` and `minimum_image(Δ, L)`
     - Wrap displacement to (−L/2, L/2] componentwise.
-  - `wrap_positions!(R::Vector{SVector{Dims,T}}, box::CubicBox{T})`
+  - `wrap_positions!(R::Vector{SVector{D,T}}, box::CubicBox{T})`
     - In-place wrap of positions to primary cell using minimum image.
 
 ## System and Particles

@@ -28,16 +28,20 @@ for the periodic `box` (wraps components to (-L/2, L/2]) and return the new vect
     return Δnew
 end
 
-@inline function minimum_image(Δ::SVector{D,T},  box::CubicBox) where {D,T<:AbstractFloat}
-    L = box.L
-    dx_corr = @inbounds SVector{D,T}(ntuple(round(Δ[d]/L)*L, D))
-    return dx - dx_corr
-end
-
 @inline function minimum_image(Δ::SVector{3,T}, box::CubicBox) where {T<:AbstractFloat}
     L = box.L
-    dx_corr = @inbounds SVector{3,T}(round(Δ[1]/L)*L, round(Δ[2]/L)*L, round(Δ[3]/L)*L)
+    dx_corr = @inbounds SVector{3,T}(round(Δ[1] / L) * L,
+                                    round(Δ[2] / L) * L,
+                                    round(Δ[3] / L) * L)
     return Δ - dx_corr
+end
+
+@inline function minimum_image(Δ::SVector{D,T}, box::CubicBox) where {D,T<:AbstractFloat}
+    L = box.L
+    return @inbounds SVector{D,T}(ntuple(d -> begin
+        δ = Δ[d]
+        δ - round(δ / L) * L
+    end, D))
 end
 
 
@@ -49,7 +53,7 @@ This is useful before building neighbor lists or measuring displacements.
 
 The resulting positions will be in the range (-L/2, L/2].
 """
-function wrap_positions!(R::Vector{SVector{Dims, T}}, box::CubicBox{T}) where {Dims,T<:AbstractFloat}
+function wrap_positions!(R::Vector{SVector{D, T}}, box::CubicBox{T}) where {D,T<:AbstractFloat}
     for i in eachindex(R)
         R[i] = minimum_image(R[i], box)
     end

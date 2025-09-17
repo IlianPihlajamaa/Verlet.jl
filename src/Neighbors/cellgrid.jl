@@ -1,43 +1,47 @@
 
 """
-    CellGrid{IT<:Integer, T<:Real}
+    CellGrid{D,IT<:Integer,T<:Real}
 
 Linked-list **cell grid** for cubic periodic boxes. The domain is split into a
-uniform `dims = (nx,ny,nz)` grid of cubic cells with an **intrusive linked list**
-(`heads`, `next`) storing particle indices in each cell. This enables **O(N)**
-rebinning at fixed density and powers the O(N) neighbor build.
+uniform `dims` grid of cubic cells with an **intrusive linked list** (`heads`,
+`next`) storing particle indices in each cell. This enables **O(N)** rebinning
+at fixed density and powers the O(N) neighbor build.
 
 # Fields
 - `L::T`: cubic box length.
-- `cell_size::T`: **effective** uniform cell width actually used for binning.
-- `dims::NTuple{3,IT}`: number of cells along each axis (each ≥ 1).
-- `heads::Vector{IT}`: length `nx*ny*nz`; head index per cell (`0` sentinel = empty).
-- `next::Vector{IT}`: length `N`; linked list “next” pointer per particle (`0` = end).
+- `cell_size::T`: effective uniform cell width used for binning.
+- `dims::NTuple{D,IT}`: number of cells along each axis (each ≥ 1).
+- `heads::Vector{IT}`: length `prod(dims)`; head index per cell (`0` sentinel).
+- `next::Vector{IT}`: length `N`; linked list “next” pointer per particle (`0`).
 
 !!! tip "How `cell_size` is chosen"
-    `build_cellgrid` computes `nx = floor(Int, L/cell_size)` and then uses the
-    **effective** width `L/nx` for indexing so that a 27-cell sweep is sufficient
+    `build_cellgrid` computes `n = floor(Int, L/cell_size)` and then uses the
+    **effective** width `L/n` for indexing so that a `(3ᵈ)` stencil is sufficient
     for a search radius ≤ `cell_size`.
 
 !!! warning "Units"
     `R` and `L` must be expressed in the **same length units**.
 """
-struct CellGrid{IT,T}
-    L::T                  # cubic box length
-    cell_size::T          # typical choice: cutoff + skin (rlist)
-    dims::NTuple{3,IT}    # (nx, ny, nz), each ≥ 1
-    heads::Vector{IT}     # length = nx*ny*nz; 0 sentinel = empty
-    next::Vector{IT}      # length = N; next particle index in the cell list (0 = end)
+struct CellGrid{D,IT,T}
+    L::T
+    cell_size::T
+    dims::NTuple{D,IT}
+    heads::Vector{IT}
+    next::Vector{IT}
 end
 
 
 
 @inline _n_cells(L::Real, cell_size::Real) = max(1, Int(floor(L / cell_size)))
 
-@inline function _linear_index(cx::Int, cy::Int, cz::Int, dims::NTuple{3,Int})
-    nx, ny, nz = dims
-    # 1-based linearization
-    return ((cz - 1) * ny + (cy - 1)) * nx + cx
+@inline function _linear_index(indices::NTuple{D,Int}, dims::NTuple{D,Int}) where {D}
+    id = 1
+    stride = 1
+    @inbounds for d in 1:D
+        id += (indices[d] - 1) * stride
+        stride *= dims[d]
+    end
+    return id
 end
 
 @inline function _coord_to_cell_idx(x::T_Float, L::T_Float, cell_size::T_Float, n::Int)
@@ -53,22 +57,24 @@ end
 """
     build_cellgrid(R, box; cell_size)
 
-Create a new `CellGrid` sized for `cell_size` and bin positions `R` (N×3).
+Create a new `CellGrid` sized for `cell_size` and bin positions `R` (N×D).
 Returns a populated grid with linked lists set for particle indices 1..N.
 """
 function build_cellgrid(R::AbstractVector, box; cell_size::Real)
-    @assert length(R[1]) == 3 "d=3"
+    D = length(R[1])
+    return _build_cellgrid(R, box, cell_size, Val(D))
+end
+
+function _build_cellgrid(R::AbstractVector, box, cell_size::Real, ::Val{D}) where {D}
+    @assert length(R[1]) == D "d=$D"
     N = length(R)
     L = float(box_length(box))
-    # Choose number of cells so that the EFFECTIVE uniform width cs_eff = L/n ≥ requested cell_size.
-    # This guarantees the standard 27-neighbor sweep is sufficient for a search radius ≤ cell_size.
-    nx = _n_cells(L, float(cell_size))              # floor(L / requested)
-    cs_eff = L / nx                                 # effective width (≥ requested)
-    dims = (nx, nx, nx)
-    heads = fill(Int(0), nx*nx*nx)
+    n = _n_cells(L, float(cell_size))
+    cs_eff = L / n
+    dims = ntuple(_ -> n, D)
+    heads = fill(Int(0), max(prod(dims), 1))
     nxt = fill(Int(0), N)
-    # Store the *effective* cell size actually used for binning (uniform tiling)
-    grid = CellGrid{Int,T_Float}(L, cs_eff, dims, heads, nxt)
+    grid = CellGrid{D,Int,T_Float}(L, cs_eff, dims, heads, nxt)
     return rebin!(grid, R, box)
 end
 
@@ -78,14 +84,13 @@ end
 Reset the grid's `heads` and `next` and bin the positions `R` into cells
 according to the current `cell_size` and periodic cubic box `box`.
 """
-function rebin!(grid::CellGrid{IT,T}, R::AbstractVector, box) where {IT<:Integer,T<:Real}
-    @assert length(R[1]) == 3 "d=3"
+function rebin!(grid::CellGrid{D,IT,T}, R::AbstractVector, box) where {D,IT<:Integer,T<:Real}
+    @assert length(R[1]) == D "d=$D"
     N = length(R)
     L = T_Float(grid.L)
-    nx, ny, nz = Int.(grid.dims)
-    cs = T_Float(grid.cell_size)  # effective uniform width used for indexing
+    dims = ntuple(d -> Int(grid.dims[d]), D)
+    cs = T_Float(grid.cell_size)
 
-    # Reset lists
     fill!(grid.heads, IT(0))
     if length(grid.next) != N
         resize!(grid.next, N)
@@ -94,11 +99,8 @@ function rebin!(grid::CellGrid{IT,T}, R::AbstractVector, box) where {IT<:Integer
 
     @inbounds for i in 1:N
         r = R[i]
-        cx = _coord_to_cell_idx(T_Float(r[1]), L, cs, nx)
-        cy = _coord_to_cell_idx(T_Float(r[2]), L, cs, ny)
-        cz = _coord_to_cell_idx(T_Float(r[3]), L, cs, nz)
-        c  = _linear_index(cx, cy, cz, (nx, ny, nz))
-        # push-front i into cell c
+        idxs = ntuple(d -> _coord_to_cell_idx(T_Float(r[d]), L, cs, dims[d]), D)
+        c = _linear_index(idxs, dims)
         grid.next[i] = grid.heads[c]
         grid.heads[c] = IT(i)
     end

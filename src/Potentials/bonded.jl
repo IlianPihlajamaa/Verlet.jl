@@ -2,7 +2,7 @@
 export HarmonicBond, Bond
 export HarmonicAngle, Angle
 export PeriodicDihedral, Dihedral
-import ..Core: compute_forces!
+import ..Core: compute_forces!, System
 
 
 # Concrete implementations of bonded potentials
@@ -102,7 +102,7 @@ function potential_energy(dihedral::PeriodicDihedral, ϕ)
     return dihedral.k * (1 + cos(dihedral.n * ϕ - dihedral.ϕ0))
 end
 
-function compute_forces!(dihedral::Dihedral, system)
+function compute_forces!(dihedral::Dihedral, system::System{T,IT,3}) where {T,IT}
     r_ij = system.positions[dihedral.j] - system.positions[dihedral.i]
     r_jk = system.positions[dihedral.k] - system.positions[dihedral.j]
     r_kl = system.positions[dihedral.l] - system.positions[dihedral.k]
@@ -136,4 +136,8 @@ function compute_forces!(dihedral::Dihedral, system)
     system.forces[dihedral.j] += f_j
     system.forces[dihedral.k] += f_k
     system.forces[dihedral.l] += f_l
+end
+
+function compute_forces!(dihedral::Dihedral, system::System{T,IT,D}) where {T,IT,D}
+    throw(DomainError(D, "Periodic dihedral forces require 3 spatial dimensions; got D=$D."))
 end

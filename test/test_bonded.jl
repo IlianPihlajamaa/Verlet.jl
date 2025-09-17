@@ -130,4 +130,18 @@ using Test
             @test f_analytical[i] ≈ f_numerical[i] atol=1e-5
         end
     end
+
+    @testset "PeriodicDihedral dimension guard" begin
+        positions2 = [SVector(0.0, 0.0), SVector(1.0, 0.0), SVector(1.0, 1.0), SVector(2.0, 1.0)]
+        velocities2 = [SVector(0.0, 0.0) for _ in positions2]
+        forces2 = [SVector(0.0, 0.0) for _ in positions2]
+        masses2 = ones(length(positions2))
+        box2 = CubicBox(10.0)
+        types2 = ones(Int, length(positions2))
+        type_names2 = Dict(1 => :A)
+        dihedral = Dihedral(1, 2, 3, 4, PeriodicDihedral(5.0, 1, 0.0))
+        sys2 = System(positions2, velocities2, forces2, masses2, box2, types2, type_names2; specific_potentials=(dihedral,))
+        ff = Verlet.Neighbors.ForceField(())
+        @test_throws DomainError Verlet.Neighbors.compute_all_forces!(sys2, ff)
+    end
 end

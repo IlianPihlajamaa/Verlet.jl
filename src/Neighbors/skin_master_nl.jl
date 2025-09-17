@@ -27,6 +27,27 @@ end
     end
     return id
 end
+
+@generated function _neighbor_offsets(::Val{D}) where {D}
+    offsets = NTuple{D,Int}[]
+    current = Vector{Int}(undef, D)
+    function rec(depth)
+        if depth > D
+            push!(offsets, tuple(current...))
+        else
+            for x in (-1, 0, 1)
+                current[depth] = x
+                rec(depth + 1)
+            end
+        end
+        return nothing
+    end
+    rec(1)
+    exprs = map(offsets) do tup
+        Expr(:tuple, tup...)
+    end
+    return Expr(:tuple, exprs...)
+end
 """
     MasterNeighborList{D,T}
 
@@ -66,9 +87,16 @@ end
 
 # --- Cell grid choice -------------------------------------------------
 
-@inline function _choose_cell_grid(box, rskin::T) where T
+@inline function _choose_cell_grid(box, rskin::T, ::Val{3}) where T
     L = box.L
-    return ntuple(d -> max(1, Int(floor(L / rskin))), 3)
+    n = max(1, Int(floor(L / rskin)))
+    return (n, n, n)
+end
+
+@inline function _choose_cell_grid(box, rskin::T, ::Val{D}) where {T,D}
+    L = box.L
+    n = max(1, Int(floor(L / rskin)))
+    return ntuple(_ -> n, D)
 end
 
 function MasterNeighborList(sys::System; cutoff::T, skin::T) where {T<:AbstractFloat}
@@ -96,8 +124,8 @@ function _make_neighbor_list(
         r0[i] = positions[i]
     end
 
-    ncells   =  _choose_cell_grid(box, rskin) 
-    ncelltot = prod(ncells)
+    dims = _choose_cell_grid(box, rskin, Val(D))
+    ncelltot = prod(dims)
 
     head = fill(0, max(ncelltot, 1))
     next = Vector{Int}(undef, N)
@@ -105,12 +133,12 @@ function _make_neighbor_list(
     pairs = Vector{SVector{2,Int}}()
     sizehint!(pairs, max(16, 100N))
 
-    _build_pairs_cells!(pairs, head, next, positions, box, rskin)
+    _build_pairs_cells!(pairs, head, next, positions, box, rskin, dims, Val(D))
 
 
     return  MasterNeighborList{D,T}(
         cutoff, cutoff2, skin, rskin2,
-        pairs, r0, zero(T), 1, ncells, 
+        pairs, r0, zero(T), 1, dims, 
         head, next
     )
 end
@@ -132,7 +160,8 @@ function rebuild!(nl::MasterNeighborList{D,T}, positions, box; method::Symbol=:c
     end
 
     if method == :cells
-        ncells = _choose_cell_grid(box, rskin)
+        # D = length(nl.ncells)
+        ncells = _choose_cell_grid(box, rskin, Val(D))
         nct = max(prod(ncells), 1)
         if length(nl.head) != nct
             resize!(nl.head, nct)
@@ -143,7 +172,7 @@ function rebuild!(nl::MasterNeighborList{D,T}, positions, box; method::Symbol=:c
         end
         empty!(nl.pairs)
         nl.ncells = ncells
-        _build_pairs_cells!(nl.pairs, nl.head, nl.next, positions, box, rskin)
+        _build_pairs_cells!(nl.pairs, nl.head, nl.next, positions, box, rskin, nl.ncells, Val(D))
     elseif method == :bruteforce
         empty!(nl.pairs)
         _build_pairs_bruteforce!(nl.pairs, positions, box, nl.rskin2)
@@ -173,27 +202,29 @@ function _build_pairs_cells!(
     next::Vector{Int},
     positions,
     box,
-    rskin::T
+    rskin::T,
+    nc::NTuple{3,Int},
+    ::Val{3}
 ) where {T<:AbstractFloat}
     rskin2 = rskin * rskin
     N = length(positions)
-    D = length(positions[1])
-    nc = _choose_cell_grid(box, rskin)
+    D = 3
     @assert prod(nc) == length(head) "head buffer size mismatch."
 
     fill!(head, 0)
 
-    # Assign particles to cells (0-based per-dim indices) using fractional coords
     @inbounds for i in 1:N
         ri = positions[i]
-        sS = fractional(box, ri)              # SVector
-        s  = MVector{D,T}(undef)
-        @inbounds for d in 1:D; s[d] = sS[d]; end
+        sS = fractional(box, ri)
+        s = MVector{D,T}(undef)
+        @inbounds for d in 1:D
+            s[d] = sS[d]
+        end
         _wrap_frac!(s)
         idx = ntuple(d -> begin
             sd = s[d] * nc[d]
-            k  = Int(floor(sd))
-            _wrap_cell_index(k, nc[d]) 
+            k = Int(floor(sd))
+            _wrap_cell_index(k, nc[d])
         end, D)
         lid = _linid0(idx, nc)
         next[i] = head[lid]
@@ -201,24 +232,96 @@ function _build_pairs_cells!(
     end
 
     empty!(pairs)
-    # sizehint!(pairs, max(length(pairs), 100N))
-
 
     @inbounds for i3 in 0:(nc[3]-1), i2 in 0:(nc[2]-1), i1 in 0:(nc[1]-1)
-        lidA = _linid0((i1,i2,i3), nc)
+        lidA = _linid0((i1, i2, i3), nc)
         uniq = Vector{Int}(undef, 27); nuniq = 0
         for d3 in -1:1, d2 in -1:1, d1 in -1:1
-            j1 =  _wrap_cell_index(i1 + d1, nc[1])
-            j2 =  _wrap_cell_index(i2 + d2, nc[2]) 
-            j3 =  _wrap_cell_index(i3 + d3, nc[3]) 
+            j1 = _wrap_cell_index(i1 + d1, nc[1])
+            j2 = _wrap_cell_index(i2 + d2, nc[2])
+            j3 = _wrap_cell_index(i3 + d3, nc[3])
             (0 <= j1 < nc[1] && 0 <= j2 < nc[2] && 0 <= j3 < nc[3]) || continue
-            lidB = _linid0((j1,j2,j3), nc)
+            lidB = _linid0((j1, j2, j3), nc)
             (lidB >= lidA) || continue
             seen = false
             @inbounds for t in 1:nuniq
-                if uniq[t] == lidB; seen = true; break; end
+                if uniq[t] == lidB
+                    seen = true
+                    break
+                end
             end
-            if !seen; nuniq += 1; uniq[nuniq] = lidB; end
+            if !seen
+                nuniq += 1
+                uniq[nuniq] = lidB
+            end
+        end
+        @inbounds for t in 1:nuniq
+            _accumulate_cell_pairs!(pairs, head, next, lidA, uniq[t], positions, box, rskin2)
+        end
+    end
+
+    return pairs
+end
+
+function _build_pairs_cells!(
+    pairs::Vector{SVector{2,Int}},
+    head::Vector{Int},
+    next::Vector{Int},
+    positions,
+    box,
+    rskin::T,
+    nc::NTuple{D,Int},
+    ::Val{D}
+) where {D,T<:AbstractFloat}
+    rskin2 = rskin * rskin
+    N = length(positions)
+    @assert prod(nc) == length(head) "head buffer size mismatch."
+
+    fill!(head, 0)
+
+    @inbounds for i in 1:N
+        ri = positions[i]
+        sS = fractional(box, ri)
+        s = MVector{D,T}(undef)
+        @inbounds for d in 1:D
+            s[d] = sS[d]
+        end
+        _wrap_frac!(s)
+        idx = ntuple(d -> begin
+            sd = s[d] * nc[d]
+            k = Int(floor(sd))
+            _wrap_cell_index(k, nc[d])
+        end, D)
+        lid = _linid0(idx, nc)
+        next[i] = head[lid]
+        head[lid] = i
+    end
+
+    empty!(pairs)
+
+    dims = ntuple(d -> 0:(nc[d]-1), D)
+    offsets = _neighbor_offsets(Val(D))
+    uniq = Vector{Int}(undef, length(offsets))
+
+    @inbounds for idx in CartesianIndices(dims)
+        tup = Tuple(idx)
+        lidA = _linid0(tup, nc)
+        nuniq = 0
+        for off in offsets
+            idxB = ntuple(d -> _wrap_cell_index(tup[d] + off[d], nc[d]), D)
+            lidB = _linid0(idxB, nc)
+            lidB < lidA && continue
+            seen = false
+            @inbounds for t in 1:nuniq
+                if uniq[t] == lidB
+                    seen = true
+                    break
+                end
+            end
+            if !seen
+                nuniq += 1
+                uniq[nuniq] = lidB
+            end
         end
         @inbounds for t in 1:nuniq
             _accumulate_cell_pairs!(pairs, head, next, lidA, uniq[t], positions, box, rskin2)

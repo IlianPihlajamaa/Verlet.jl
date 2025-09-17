@@ -71,26 +71,26 @@ build_all_neighbors!(master, ff, sys; method=:cells)
 
 ## Cell Grid Details
 
-- `CellGrid{IT,T}` fields:
+- `CellGrid{D,IT,T}` fields:
   - `L::T`: cubic box length; assumed consistent with positions’ units.
   - `cell_size::T`: effective uniform cell width actually used for binning.
-  - `dims::NTuple{3,IT}`: `(nx,ny,nz)`; each ≥ 1.
-  - `heads::Vector{IT}`: length `nx*ny*nz`; head index per cell (`0` sentinel = empty).
+  - `dims::NTuple{D,IT}`: number of cells along each axis (each ≥ 1).
+  - `heads::Vector{IT}`: length `prod(dims)`; head index per cell (`0` sentinel = empty).
   - `next::Vector{IT}`: length `N`; intrusive linked-list “next” pointer per particle (`0` = end).
 - Build and rebin:
   - `build_cellgrid(R, box; cell_size)` constructs a grid sized so that the effective width `cs_eff = L / floor(L/cell_size) ≥ cell_size` and immediately `rebin!`s the positions.
   - `rebin!(grid, R, box)` resets `heads` and `next` and push-fronts each particle index `i` into its cell list using periodic mapping.
 - Indexing and periodicity:
   - Positions are mapped to `[0, L)` via `x0 = x + 0.5L; x0 -= floor(x0 / L) * L`, then to cell indices `1..n` via `floor(x0/cell_size)+1` clamped to `[1,n]`.
-  - Cell linear index: `((cz-1)*ny + (cy-1))*nx + cx`.
-  - 27-neighbor stencil computed by `_neighbors_of_cell` using `mod1` periodic wrap per axis.
+  - Cell linear index computed via row-major strides over `dims`.
+  - A `3^D`-neighbor stencil around each base cell is enumerated; offsets use periodic wrap per axis.
 
 ## Master List Algorithm
 
 - `:cells` (default):
-  - `_choose_cell_grid` selects a `(nx, ny, nz)` stencil so that each cell edge is at most `cutoff + skin`.
+  - `_choose_cell_grid` selects a uniform `dims` tuple so that each cell edge is at most `cutoff + skin`.
   - Particles are assigned to cells by fractional coordinates and stored in intrusive lists via the `head`/`next` buffers.
-  - For each base cell, the algorithm visits the 27-neighbor stencil with wraparound and emits `(i, j)` with `i < j` whenever the minimum-image squared distance is ≤ `(cutoff + skin)^2`.
+  - For each base cell, the algorithm visits the `3^D` neighbor stencil with wraparound and emits `(i, j)` with `i < j` whenever the minimum-image squared distance is ≤ `(cutoff + skin)^2`.
   - `ncells`, `head`, and `next` are kept on the list object and reused between builds; buffers resize only when the particle count or grid shape changes.
 - `:bruteforce`: nested loops for `i<j`, computing minimum-image distances directly and respecting the same cutoff radius (expected `O(N^2)`).
 - `:all_pairs`: nested loops for `i<j` that bypass the cutoff entirely; useful for debugging and consistency tests.
@@ -101,6 +101,6 @@ build_all_neighbors!(master, ff, sys; method=:cells)
 
 ## Assumptions and Invariants
 
-- Positions are 3D `SVector{3,T}`; the builder asserts `d=3`.
+- Positions are `SVector{D,T}` for arbitrary `D ≥ 1` (default `D=3`).
 - Minimum-image distances under the provided `CubicBox` determine pair inclusion.
 - `master.pairs` is cleared before each rebuild; buffers grow amortized.
