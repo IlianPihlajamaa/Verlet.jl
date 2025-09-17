@@ -17,8 +17,10 @@ A flexible and type-stable container for particle-based simulations.
 - `types::Vector{IT}`: Particle type identifiers (integers).
 - `type_names::Dict{IT, Symbol}`: Mapping from type identifiers to descriptive names (e.g., `1 => :H`).
 - `natoms::IT`: Total number of atoms.
+- `specific_potentials::Tuple`: Optional bonded interactions.
+- `forcefield`: Object providing `compute_forces!`; typically a `ForceField` or `nothing`.
 """
-struct System{T<:AbstractFloat,IT<:Integer,Dims, BOX<:AbstractBox{T}}
+struct System{T<:AbstractFloat,IT<:Integer,Dims, BOX<:AbstractBox{T}, FF}
     positions::Vector{SVector{Dims,T}}
     velocities::Vector{SVector{Dims,T}}
     forces::Vector{SVector{Dims,T}}
@@ -28,6 +30,7 @@ struct System{T<:AbstractFloat,IT<:Integer,Dims, BOX<:AbstractBox{T}}
     type_names::Dict{IT,Symbol}
     natoms::IT
     specific_potentials::Tuple
+    forcefield::FF
 
     function System(
         positions::Vector{SVector{Dims,T}},
@@ -37,14 +40,15 @@ struct System{T<:AbstractFloat,IT<:Integer,Dims, BOX<:AbstractBox{T}}
         box::AbstractBox{T},
         types::Vector{IT},
         type_names::Dict{IT,Symbol};
-        specific_potentials::Tuple=()
+        specific_potentials::Tuple=(),
+        forcefield=nothing
     ) where {T<:AbstractFloat,IT<:Integer,Dims}
         natoms = length(positions)
         @assert length(velocities) == natoms "velocities must be same size as positions"
         @assert length(forces) == natoms "forces must be same size as positions"
         @assert length(masses) == natoms "masses must be same size as positions"
         @assert length(types) == natoms "types must be same size as positions"
-        new{T,IT,Dims, typeof(box)}(positions, velocities, forces, masses, box, types, type_names, natoms, specific_potentials)
+        new{T,IT,Dims, typeof(box), typeof(forcefield)}(positions, velocities, forces, masses, box, types, type_names, natoms, specific_potentials, forcefield)
     end
 end
 

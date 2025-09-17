@@ -154,7 +154,7 @@ All positions, velocities, and forces are now represented as `Vector{SVector{D, 
 ## See Also
 
 - [`System`](@ref Verlet.Core.System): container for positions, velocities, and masses.
-- [`velocity_verlet!`](@ref Verlet.Core.velocity_verlet!): unconstrained Velocity-Verlet integrator.
+- [`VelocityVerlet`](@ref Verlet.Integrators.VelocityVerlet): unconstrained Velocity-Verlet integrator.
 - [`degrees_of_freedom`](@ref Verlet.Thermostats.degrees_of_freedom): count effective translational degrees of freedom.
 - [`remove_com_motion!`](@ref Verlet.Constraints.remove_com_motion!): eliminate center-of-mass drift.
 

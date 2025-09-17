@@ -5,7 +5,8 @@
 
 ## Re-exports (user-facing)
 
-- Core: `System`, `natoms`, `natomtypes`, `AbstractBox`, `CubicBox`, `minimum_image`, `wrap_positions!`, `box_length`, `velocity_verlet!`, `integrate!`, `potential_energy`, `kinetic_energy`, `T_Float`, `T_Int`, `Dims`.
+- Core: `System`, `natoms`, `natomtypes`, `AbstractBox`, `CubicBox`, `minimum_image`, `wrap_positions!`, `box_length`, `AbstractIntegrator`, `integrate!`, `potential_energy`, `kinetic_energy`, `T_Float`, `T_Int`, `Dims`.
+- Integrators: `VelocityVerlet`, `ConjugateGradient`.
 - Neighbor types: `NeighborPair`, `PotentialNeighborList`, `MasterNeighborList`.
 - Potential types: `AbstractPotentialPair`, `AbstractPairPotential`, `AbstractBondPotential`, `AbstractAnglePotential`, `AbstractDihedralPotential`, `AbstractImproperPotential`.
 - Concrete potentials: `LennardJones`, `Coulomb`, `LJPair`, `CoulPair`, `PairTable`, `Bond`, `Angle`, `Dihedral`, `HarmonicBond`, `HarmonicAngle`, `PeriodicDihedral`.

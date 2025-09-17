@@ -107,7 +107,9 @@ using Verlet
         steps = 7
 
         Random.seed!(2024)
-        integrate!(langevin_baoab_constrained!, sys1, forces_func, dt, steps, cons1; γ=γ, temp=T, rng=rng)
+        for _ in 1:steps
+            langevin_baoab_constrained!(sys1, forces_func, dt, cons1; γ=γ, temp=T, rng=rng)
+        end
         Random.seed!(2024)
         for _ in 1:steps
             langevin_baoab_constrained!(sys2, forces_func, dt, cons2; γ=γ, temp=T, rng=rng)

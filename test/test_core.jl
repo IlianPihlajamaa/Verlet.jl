@@ -5,6 +5,17 @@ using LinearAlgebra, StaticArrays
 
 const Dims = 3
 
+struct HarmonicWell end
+
+function Verlet.Core.compute_forces!(::HarmonicWell, sys::System)
+    @inbounds for i in 1:natoms(sys)
+        sys.forces[i] += -sys.positions[i]
+    end
+    return sys
+end
+
+harmonic_energy(sys::System) = 0.5 * sum(dot(r, r) for r in sys.positions)
+
 @testset "Core functionality" begin
     @testset "System construction" begin
         positions = [SVector{Dims,Float64}(0.0,0.0,0.0)]
@@ -20,38 +31,28 @@ const Dims = 3
         @test sys.masses == [1.0]
     end
     @testset "Velocity Verlet" begin
-        @testset "Velocity Verlet free particle" begin
-            forces_func(r) = fill(SVector{Dims,Float64}(0.0,0.0,0.0), length(r))
-            positions = [SVector{Dims,Float64}(0.0,0.0,0.0)]
-            velocities = [SVector{Dims,Float64}(1.0,0.0,0.0)]
-            forces = [SVector{Dims,Float64}(0.0,0.0,0.0)]
-            masses = [1.0]
-            box = CubicBox(10.0)
-            types = [1]
-            type_names = Dict(1 => :A)
-            sys = System(positions, velocities, forces, masses, box, types, type_names)
-            velocity_verlet!(sys, forces_func, 0.1)
-            @test isapprox(sys.positions[1][1], 0.1; atol=1e-12)
-            @test isapprox(sys.velocities[1][1], 1.0; atol=1e-12)
-        end
+        positions = [SVector{Dims,Float64}(0.0,0.0,0.0)]
+        velocities = [SVector{Dims,Float64}(1.0,0.0,0.0)]
+        forces = [SVector{Dims,Float64}(0.0,0.0,0.0)]
+        masses = [1.0]
+        box = CubicBox(10.0)
+        types = [1]
+        type_names = Dict(1 => :A)
+        sys = System(copy(positions), copy(velocities), copy(forces), copy(masses), box, types, type_names;
+                     forcefield=ForceField(()) )
+        vv = VelocityVerlet(0.1)
+        integrate!(vv, sys, 1)
+        @test isapprox(sys.positions[1][1], 0.1; atol=1e-12)
+        @test isapprox(sys.velocities[1][1], 1.0; atol=1e-12)
 
-        @testset "Velocity Verlet harmonic oscillator" begin
-            forces_func(r) = map(x -> -x, r)
-            positions = [SVector{Dims,Float64}(1.0,0.0,0.0)]
-            velocities = [SVector{Dims,Float64}(0.0,0.0,0.0)]
-            forces = [SVector{Dims,Float64}(0.0,0.0,0.0)]
-            masses = [1.0]
-            box = CubicBox(10.0)
-            types = [1]
-            type_names = Dict(1 => :A)
-            sys = System(positions, velocities, forces, masses, box, types, type_names)
-            velocity_verlet!(sys, forces_func, 0.1)
-            @test sys.positions[1][1] < 1.0   # should move left
-        end
+        sys_ho = System([SVector{Dims,Float64}(1.0,0.0,0.0)], [SVector{Dims,Float64}(0.0,0.0,0.0)],
+                        [SVector{Dims,Float64}(0.0,0.0,0.0)], [1.0], box, types, type_names;
+                        forcefield=ForceField((HarmonicWell(),)))
+        integrate!(VelocityVerlet(0.1), sys_ho, 1)
+        @test sys_ho.positions[1][1] < 1.0
     end
 
-    @testset "integrate! driver" begin
-        forces_func(r) = map(x -> -x, r)
+    @testset "VelocityVerlet integrator behaviour" begin
         function make_system(; pos=SVector{Dims,Float64}(1.0, 0.0, 0.0),
                                vel=SVector{Dims,Float64}(0.0, 1.0, 0.0))
             positions = [pos]
@@ -61,16 +62,19 @@ const Dims = 3
             box = CubicBox(10.0)
             types = [1]
             type_names = Dict(1 => :A)
-            return System(positions, velocities, forces, masses, box, types, type_names)
+            return System(copy(positions), copy(velocities), copy(forces), copy(masses), box, types, type_names;
+                          forcefield=ForceField((HarmonicWell(),)))
         end
         dt = 0.1
 
         @testset "matches direct loop" begin
             sys_integrated = make_system()
             sys_reference = deepcopy(sys_integrated)
-            integrate!(velocity_verlet!, sys_integrated, forces_func, dt, 5)
+            vv = VelocityVerlet(dt)
+            integrate!(vv, sys_integrated, 5)
+            manual_vv = VelocityVerlet(dt)
             for _ in 1:5
-                velocity_verlet!(sys_reference, forces_func, dt)
+                integrate!(manual_vv, sys_reference, 1)
             end
             @test all(isapprox.(sys_integrated.positions, sys_reference.positions; atol=1e-12))
             @test all(isapprox.(sys_integrated.velocities, sys_reference.velocities; atol=1e-12))
@@ -79,8 +83,9 @@ const Dims = 3
         @testset "zero steps no-op" begin
             sys_zero = make_system()
             sys_copy = deepcopy(sys_zero)
+            vv = VelocityVerlet(dt)
             calls = Ref(0)
-            integrate!(velocity_verlet!, sys_zero, forces_func, dt, 0; callback = (sys, step) -> (calls[] += 1))
+            integrate!(vv, sys_zero, 0; callback = (sys, step) -> (calls[] += 1))
             @test sys_zero.positions == sys_copy.positions
             @test sys_zero.velocities == sys_copy.velocities
             @test calls[] == 0
@@ -89,47 +94,26 @@ const Dims = 3
         @testset "callback early stop" begin
             sys_cb = make_system()
             sys_reference = deepcopy(sys_cb)
+            vv = VelocityVerlet(dt)
             last_step = Ref(0)
-            integrate!(velocity_verlet!, sys_cb, forces_func, dt, 10;
+            integrate!(vv, sys_cb, 10;
                        callback = (sys, step) -> begin
                            last_step[] = step
-                           return step == 3 ? false : nothing
+                           step == 3 ? false : nothing
                        end)
+            vv_single = VelocityVerlet(dt)
             for _ in 1:3
-                velocity_verlet!(sys_reference, forces_func, dt)
+                integrate!(vv_single, sys_reference, 1)
             end
             @test last_step[] == 3
             @test all(isapprox.(sys_cb.positions, sys_reference.positions; atol=1e-12))
             @test all(isapprox.(sys_cb.velocities, sys_reference.velocities; atol=1e-12))
         end
 
-        function drift_with_offset!(sys::System, forces, dt, offset; scale::Real=1.0)
-            forces(sys.positions)
-            for i in eachindex(sys.positions)
-                sys.positions[i] += offset * (dt * scale)
-            end
-            return sys
-        end
-        zero_forces(R) = fill(SVector{Dims,Float64}(0.0, 0.0, 0.0), length(R))
-
-        @testset "forwards extra args" begin
-            positions = [SVector{Dims,Float64}(0.0, 0.0, 0.0)]
-            velocities = [SVector{Dims,Float64}(0.0, 0.0, 0.0)]
-            forces = [SVector{Dims,Float64}(0.0, 0.0, 0.0)]
-            masses = [1.0]
-            box = CubicBox(5.0)
-            types = [1]
-            type_names = Dict(1 => :A)
-            sys_extra = System(positions, velocities, forces, masses, box, types, type_names)
-            offset = SVector{Dims,Float64}(1.0, 0.0, 0.0)
-            integrate!(drift_with_offset!, sys_extra, zero_forces, 0.5, 4, offset; scale=2.0)
-            @test sys_extra.positions[1] == SVector{Dims,Float64}(4.0, 0.0, 0.0)
-            @test sys_extra.velocities[1] == SVector{Dims,Float64}(0.0, 0.0, 0.0)
-        end
-
         @testset "rejects negative steps" begin
             sys_neg = make_system()
-            @test_throws ArgumentError integrate!(velocity_verlet!, sys_neg, forces_func, dt, -2)
+            vv = VelocityVerlet(dt)
+            @test_throws ArgumentError integrate!(vv, sys_neg, -2)
         end
     end
 
@@ -142,10 +126,10 @@ const Dims = 3
         box2 = CubicBox(4.0)
         types2 = [1, 1]
         type_names2 = Dict(1 => :A)
-        sys2 = System(positions2, velocities2, forces2, masses2, box2, types2, type_names2)
+        sys2 = System(positions2, velocities2, forces2, masses2, box2, types2, type_names2;
+                      forcefield=ForceField((HarmonicWell(),)))
         wrap_positions!(sys2.positions, sys2.box)
-        forces_func2(R) = map(r -> -r, R)
-        integrate!(velocity_verlet!, sys2, forces_func2, 0.02, 10)
+        integrate!(VelocityVerlet(0.02), sys2, 10)
         @test length(sys2.positions[1]) == D2
         @test all(isfinite, first(sys2.positions))
 
@@ -157,10 +141,37 @@ const Dims = 3
         box4 = CubicBox(6.0)
         types4 = [1]
         type_names4 = Dict(1 => :A)
-        sys4 = System(positions4, velocities4, forces4, masses4, box4, types4, type_names4)
+        sys4 = System(positions4, velocities4, forces4, masses4, box4, types4, type_names4;
+                      forcefield=ForceField((HarmonicWell(),)))
         wrap_positions!(sys4.positions, sys4.box)
-        integrate!(velocity_verlet!, sys4, forces_func2, 0.01, 1)
+        integrate!(VelocityVerlet(0.01), sys4, 1)
         @test length(sys4.positions[1]) == D4
+    end
+
+    @testset "Conjugate-gradient minimisation" begin
+        positions = [SVector{Dims,Float64}(2.0, -1.0, 0.5), SVector{Dims,Float64}(-1.5, 0.7, 1.2)]
+        init_positions = copy(positions)
+        velocities = [SVector{Dims,Float64}(0.0, 0.0, 0.0) for _ in positions]
+        forces = [SVector{Dims,Float64}(0.0, 0.0, 0.0) for _ in positions]
+        masses = ones(Float64, length(positions))
+        box = CubicBox(20.0)
+        types = ones(Int, length(positions))
+        type_names = Dict(1 => :A)
+        sys = System(copy(positions), copy(velocities), copy(forces), copy(masses), box, types, type_names;
+                     forcefield=ForceField((HarmonicWell(),)))
+
+        energies = Float64[]
+        energy0 = harmonic_energy(sys)
+        cg = ConjugateGradient(harmonic_energy; tol=1e-10)
+        integrate!(cg, sys, 200; callback = (s, iter, E) -> push!(energies, E))
+        energy_final = harmonic_energy(sys)
+
+        @test energy_final ≤ energy0 - 1e-8
+        @test maximum(norm.(sys.positions)) ≤ 1e-5
+        @test all(diff(energies) .≤ 1e-10)
+
+        sys2 = System(copy(init_positions), copy(velocities), copy(forces), copy(masses), box, types, type_names)
+        @test_throws ArgumentError integrate!(cg, sys2, 10)
     end
 
     @testset "Velocity Verlet energy conservation" begin
@@ -180,19 +191,17 @@ const Dims = 3
         box = CubicBox(10.0)
         types = [1]
         type_names = Dict(1 => :A)
-        sys = System(positions, velocities, forces, masses, box, types, type_names)
+        sys = System(positions, velocities, forces, masses, box, types, type_names;
+                     forcefield=ForceField((HarmonicWell(),)))
 
-        (_, U0) = ho_forces(sys.positions; return_potential=true)
-        KE0 = kinetic_energy(sys)
-        E0 = KE0 + U0
+        E0 = kinetic_energy(sys) + harmonic_energy(sys)
 
         energies = Float64[E0]
         dt = 0.002
         steps = 2000
-        integrate!(velocity_verlet!, sys, ho_forces, dt, steps;
+        integrate!(VelocityVerlet(dt), sys, steps;
                    callback = (sys, step) -> begin
-                       (_, U) = ho_forces(sys.positions; return_potential=true)
-                       push!(energies, kinetic_energy(sys) + U)
+                       push!(energies, kinetic_energy(sys) + harmonic_energy(sys))
                        return nothing
                    end)
 

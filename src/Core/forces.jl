@@ -19,3 +19,9 @@ function compute_all_forces!(sys::System, ff::ForceField)
         compute_forces!(interaction, sys)
     end
 end
+
+function compute_all_forces!(sys::System)
+    ff = sys.forcefield
+    ff === nothing && throw(ArgumentError("System has no forcefield assigned"))
+    compute_all_forces!(sys, ff)
+end

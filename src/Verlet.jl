@@ -3,6 +3,9 @@ module Verlet
 include("Core/Core.jl")
 using .Core
 
+include("Integrators/Integrators.jl")
+using .Integrators
+
 include("Neighbors/Neighbors.jl")
 using .Neighbors
 
@@ -16,7 +19,7 @@ include("Thermostats/Thermostats.jl")
 using .Thermostats
 
 # Re-export from Core
-export System, natoms, natomtypes, AbstractBox, velocity_verlet!, integrate!, potential_energy, kinetic_energy
+export System, natoms, natomtypes, AbstractBox, AbstractIntegrator, integrate!, VelocityVerlet, ConjugateGradient, potential_energy, kinetic_energy
 export CubicBox, minimum_image, wrap_positions!, box_length
 export T_Float, T_Int, Dims
 export NeighborPair, PotentialNeighborList, MasterNeighborList
