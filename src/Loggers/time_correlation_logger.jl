@@ -23,26 +23,23 @@ function _update_window!(window::WindowBuffer{TA,TB,TC}, sampleA::TA, sampleB::T
     new_index = window.write_index == len ? 1 : window.write_index + 1
     window.a_values[new_index] = sampleA
     window.b_values[new_index] = sampleB
-    if window.filled < len
-        window.filled += 1
+
+    filled = window.filled
+    if filled < len
+        filled += 1
+        window.filled = filled
     end
     window.write_index = new_index
 
-    origin = new_index - window.filled + 1
-    if origin <= 0
-        origin += len
-    end
-
-    aval = window.a_values[origin]
-    idx_target = origin
-    for lag in 0:window.filled-1
-        if idx_target > len
-            idx_target -= len
-        end
-        bval = window.b_values[idx_target]
-        window.corr_sum[lag + 1] += product(aval, bval)
+    idx = new_index
+    for lag in 0:(window.filled - 1)
+        aval = window.a_values[idx]
+        window.corr_sum[lag + 1] += product(aval, sampleB)
         window.counts[lag + 1] += 1
-        idx_target += 1
+        idx -= 1
+        if idx == 0
+            idx = len
+        end
     end
 
     return nothing

@@ -66,6 +66,8 @@ function build_neighbors_from_master!(pot::AbstractPairPotential, sys::System, m
 
     neighbors = pot.neighborlist.neighbors
     empty!(neighbors)
+    NeighborType = eltype(neighbors)
+    IndexType = fieldtype(NeighborType, :i)
 
     types = sys.types
     skin = pot.skin
@@ -81,7 +83,7 @@ function build_neighbors_from_master!(pot::AbstractPairPotential, sys::System, m
         p = pot.params.table[types[i], types[j]]
         rc = p.rc
         if !is_excluded(pot, i, j) && r2 < (rc + skin)^2
-            push!(neighbors, NeighborPair{PairType, Int}(i, j, p))
+            push!(neighbors, NeighborPair{PairType, IndexType}(IndexType(i), IndexType(j), p))
         end
     end
 end
@@ -97,7 +99,11 @@ function build_all_neighbors!(master_nl::MasterNeighborList, ff::ForceField, sys
 
     build_master_neighborlist!(master_nl, sys; r_verlet=rc_max, method=method)
 
-    map(pot -> build_neighbors_from_master!(pot, sys, master_nl), pair_layers)
+    for pot in pair_layers
+        build_neighbors_from_master!(pot, sys, master_nl)
+    end
+
+    return master_nl
 end
 
 function _has_pair_potentials(layers)

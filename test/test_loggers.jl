@@ -97,7 +97,6 @@ observed_quantity(::SquareObservable) = :step2
 function simulate_multiple_windows(values_a::Vector{Float64}, values_b::Vector{Float64}, block_length::Int, stride::Int, sample_stride::Int)
     len = block_length
     a_buf = Vector{Float64}(undef, len)
-    b_buf = Vector{Float64}(undef, len)
     filled = 0
     write_index = 0
     corr_sum = zeros(Float64, len)
@@ -108,23 +107,17 @@ function simulate_multiple_windows(values_a::Vector{Float64}, values_b::Vector{F
         write_index = write_index == len ? 1 : write_index + 1
         sample_idx = step + 1
         a_buf[write_index] = values_a[sample_idx]
-        b_buf[write_index] = values_b[sample_idx]
         if filled < len
             filled += 1
         end
-        origin = write_index - filled + 1
-        if origin <= 0
-            origin += len
-        end
-        aval = a_buf[origin]
-        target = origin
+        idx = write_index
         for lag in 0:(filled - 1)
-            if target > len
-                target -= len
-            end
-            corr_sum[lag + 1] += aval * b_buf[target]
+            corr_sum[lag + 1] += a_buf[idx] * values_b[sample_idx]
             counts[lag + 1] += 1
-            target += 1
+            idx -= 1
+            if idx == 0
+                idx = len
+            end
         end
     end
     return corr_sum, counts, filled
