@@ -31,9 +31,9 @@ These values are useful for debugging and regression testing.
 ## Usage with cBAOAB
 
 When running constrained Langevin dynamics with
-[`langevin_baoab_constrained!`](@ref), residuals should remain close to machine
-precision (typically `1e-8` or smaller) if the solver tolerance is sufficiently
-strict.
+[`LangevinBAOABConstrained`](@ref Verlet.Integrators.LangevinBAOABConstrained),
+residuals should remain close to machine precision (typically `1e-8` or
+smaller) if the solver tolerance is sufficiently strict.
 
 ---
 
@@ -41,4 +41,4 @@ See also:
 
 * [`apply_shake!`](@ref)
 * [`apply_rattle!`](@ref)
-* [`langevin_baoab_constrained!`](@ref)
+* [`LangevinBAOABConstrained`](@ref Verlet.Integrators.LangevinBAOABConstrained)

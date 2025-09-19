@@ -1,6 +1,6 @@
 # Spec: Module `Verlet.Thermostats`
 
-Purpose: Thermostatting utilities and Langevin BAOAB integrators (un/constrained).
+Purpose: Thermostatting utilities (degrees of freedom, temperature estimators, deterministic rescaling).
 
 ## Degrees of freedom and temperature
 
@@ -9,41 +9,39 @@ Purpose: Thermostatting utilities and Langevin BAOAB integrators (un/constrained
 - `instantaneous_temperature(sys; kB=1.0)`
   - `T = 2*KE / (kB * dof)` using `degrees_of_freedom(sys)`.
 - `velocity_rescale!(sys, T; kB=1.0)`
-  - Deterministically rescales velocities by `λ = sqrt(T/ max(Tinst, eps()))`.
+  - Deterministically rescales velocities by `λ = sqrt(T / max(Tinst, eps()))`.
 
-## Langevin BAOAB (unconstrained)
+## Langevin Integrators
 
-- `langevin_baoab!(sys, forces, dt; γ, temp, kB=1.0, rng=Random.default_rng())`
-  - Splitting: B(½) → A(½) → O → A(½) → B(½).
-  - OU step uses `c = exp(-γ*dt)` (with a stable series fallback internally) and noise variance `(1-c^2) * kB*temp / m_i` per component.
-  - With `γ=0` reduces to deterministic velocity-Verlet.
+Langevin BAOAB schemes now live in [`Verlet.Integrators`](Spec_Integrators.md):
 
-## Constrained Langevin BAOAB
+- `LangevinBAOAB(dt; γ, temp, kB=1.0, wrap=false, rng=Random.default_rng())`
+- `LangevinBAOABConstrained(dt, constraints; γ, temp, kB=1.0, wrap=false, rng=Random.default_rng())`
 
-- `langevin_baoab_constrained!(sys, forces, dt, cons::DistanceConstraints; γ, temp, kB=1.0, rng=Random.default_rng())`
-  - Splitting with projections:
-    1. B(½) → `apply_rattle!`
-    2. A(½) → `apply_shake!`
-    3. O → `apply_rattle!`
-    4. A(½) → `apply_shake!`
-    5. Recompute forces
-    6. B(½) → `apply_rattle!`
-  - Recommended path when rigid bonds/constraints are present.
-
-## Invariants & Notes
-
-- All updates are in-place on `sys.positions`/`sys.velocities`.
-- `forces(R)` must return a vector of force vectors aligned with `R` and is called twice per BAOAB step (unconstrained) or once before/after projections (constrained).
-- For reproducibility, pass an explicit RNG.
+Each implements `step!(integrator, system)` and works with `integrate!`, rebuilding
+neighbor lists and updating forces via the `System`'s `ForceField`.
 
 ## Example
 
 ```julia
 using Verlet, StaticArrays, Random
+
+struct Springs
+    k::Float64
+end
+
+function Verlet.Core.compute_forces!(pot::Springs, sys::System)
+    @inbounds for i in 1:natoms(sys)
+        sys.forces[i] += -pot.k * sys.positions[i]
+    end
+    return sys
+end
+
 box = CubicBox(5.0)
 R = [@SVector randn(3) for _ in 1:8]; wrap_positions!(R, box)
-sys = System(R, fill(@SVector zeros(3),8), fill(@SVector zeros(3),8), ones(8), box, ones(Int,8), Dict(1=>:A))
-forces = R -> [ -r for r in R ]
-langevin_baoab!(sys, forces, 0.001; γ=1.0, temp=1.0, rng=MersenneTwister(1))
-```
+sys = System(R, fill(@SVector zeros(3),8), fill(@SVector zeros(3),8), ones(8), box, ones(Int,8), Dict(1=>:A);
+           forcefield=ForceField((Springs(1.0),)))
 
+integrator = Verlet.Integrators.LangevinBAOAB(0.001; γ=1.0, temp=1.0, rng=MersenneTwister(1))
+integrate!(integrator, sys, 100)
+```

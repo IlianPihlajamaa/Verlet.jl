@@ -85,7 +85,7 @@ harmonic_energy(sys::System) = 0.5 * sum(dot(r, r) for r in sys.positions)
             sys_copy = deepcopy(sys_zero)
             vv = VelocityVerlet(dt)
             calls = Ref(0)
-            integrate!(vv, sys_zero, 0; callback = (sys, step) -> (calls[] += 1))
+            integrate!(vv, sys_zero, 0; callback = (sys, step, _) -> (calls[] += 1))
             @test sys_zero.positions == sys_copy.positions
             @test sys_zero.velocities == sys_copy.velocities
             @test calls[] == 0
@@ -97,7 +97,7 @@ harmonic_energy(sys::System) = 0.5 * sum(dot(r, r) for r in sys.positions)
             vv = VelocityVerlet(dt)
             last_step = Ref(0)
             integrate!(vv, sys_cb, 10;
-                       callback = (sys, step) -> begin
+                       callback = (sys, step, _) -> begin
                            last_step[] = step
                            step == 3 ? false : nothing
                        end)
@@ -114,6 +114,98 @@ harmonic_energy(sys::System) = 0.5 * sum(dot(r, r) for r in sys.positions)
             sys_neg = make_system()
             vv = VelocityVerlet(dt)
             @test_throws ArgumentError integrate!(vv, sys_neg, -2)
+        end
+
+        @testset "auto master neighborlist" begin
+            positions = [
+                SVector{Dims,Float64}(0.0, 0.0, 0.0),
+                SVector{Dims,Float64}(1.0, 0.0, 0.0),
+                SVector{Dims,Float64}(0.0, 1.0, 0.0),
+            ]
+            velocities = [SVector{Dims,Float64}(0.0, 0.0, 0.0) for _ in 1:3]
+            forces = [SVector{Dims,Float64}(0.0, 0.0, 0.0) for _ in 1:3]
+            masses = ones(Float64, 3)
+            box = CubicBox(10.0)
+            types = ones(Int, 3)
+            type_names = Dict(1 => :A)
+
+            lj_pair = LJPair(1.0, 1.0, 5.0)
+            params = PairTable(fill(lj_pair, (1, 1)))
+            exclusions = Tuple{Int,Int}[]
+            lj = LennardJones(params, exclusions, 0.0)
+            ff = ForceField((lj,))
+
+            sys_auto = System(copy(positions), copy(velocities), copy(forces), copy(masses), box, types, type_names;
+                               forcefield=ff)
+
+            integrate!(VelocityVerlet(0.01), sys_auto, 1)
+
+            @test sys_auto.forcefield.master isa Verlet.Neighbors.MasterNeighborList
+            @test length(lj.neighborlist.neighbors) == 3
+        end
+
+        @testset "maybe_rebuild respects skin" begin
+            positions = [
+                SVector{Dims,Float64}(0.0, 0.0, 0.0),
+                SVector{Dims,Float64}(1.5, 0.0, 0.0)
+            ]
+            velocities = [SVector{Dims,Float64}(0.0, 0.0, 0.0) for _ in positions]
+            forces = [SVector{Dims,Float64}(0.0, 0.0, 0.0) for _ in positions]
+            masses = ones(Float64, length(positions))
+            box = CubicBox(10.0)
+            types = ones(Int, length(positions))
+            type_names = Dict(1 => :A)
+
+            lj_pair = LJPair(1.0, 1.0, 5.0)
+            params = PairTable(fill(lj_pair, (1, 1)))
+            exclusions = Tuple{Int,Int}[]
+            lj = LennardJones(params, exclusions, 0.0)
+            ff = ForceField((lj,))
+
+            sys = System(copy(positions), copy(velocities), copy(forces), copy(masses), box, types, type_names;
+                         forcefield=ff)
+            master = MasterNeighborList(sys; cutoff=5.0, skin=0.4)
+
+            maybe_rebuild(sys, master; method=:all_pairs)
+            initial_builds = master.nbuilds
+
+            sys.positions[1] += SVector{Dims,Float64}(0.1, 0.0, 0.0)
+            maybe_rebuild(sys, master; method=:all_pairs)
+            @test master.nbuilds == initial_builds
+
+            sys.positions[1] += SVector{Dims,Float64}(0.2, 0.0, 0.0)
+            maybe_rebuild(sys, master; method=:all_pairs)
+            @test master.nbuilds == initial_builds + 1
+        end
+
+        @testset "compute_potential_energy" begin
+            positions = [
+                SVector{Dims,Float64}(0.0, 0.0, 0.0),
+                SVector{Dims,Float64}(1.1, 0.0, 0.0)
+            ]
+            velocities = [SVector{Dims,Float64}(0.0, 0.0, 0.0) for _ in positions]
+            forces = [SVector{Dims,Float64}(0.0, 0.0, 0.0) for _ in positions]
+            masses = ones(Float64, length(positions))
+            box = CubicBox(10.0)
+            types = ones(Int, length(positions))
+            type_names = Dict(1 => :A)
+
+            lj_pair = LJPair(1.0, 1.0, 3.0)
+            params = PairTable(fill(lj_pair, (1, 1)))
+            exclusions = Tuple{Int,Int}[]
+            lj = LennardJones(params, exclusions, 0.3)
+            ff = ForceField((lj,))
+
+            sys = System(copy(positions), copy(velocities), copy(forces), copy(masses), box, types, type_names;
+                         forcefield=ff)
+
+            energy = compute_potential_energy(sys)
+            r = 1.1
+            σ = lj_pair.σ
+            ϵ = lj_pair.ε
+            s = σ / r
+            manual = 4 * ϵ * (s^12 - s^6)
+            @test isapprox(energy, manual; atol=1e-12)
         end
     end
 
@@ -163,7 +255,7 @@ harmonic_energy(sys::System) = 0.5 * sum(dot(r, r) for r in sys.positions)
         energies = Float64[]
         energy0 = harmonic_energy(sys)
         cg = ConjugateGradient(harmonic_energy; tol=1e-10)
-        integrate!(cg, sys, 200; callback = (s, iter, E) -> push!(energies, E))
+        integrate!(cg, sys, 200; callback = (s, iter, integrator) -> push!(energies, harmonic_energy(s)))
         energy_final = harmonic_energy(sys)
 
         @test energy_final ≤ energy0 - 1e-8
@@ -200,7 +292,7 @@ harmonic_energy(sys::System) = 0.5 * sum(dot(r, r) for r in sys.positions)
         dt = 0.002
         steps = 2000
         integrate!(VelocityVerlet(dt), sys, steps;
-                   callback = (sys, step) -> begin
+                   callback = (sys, step, _) -> begin
                        push!(energies, kinetic_energy(sys) + harmonic_energy(sys))
                        return nothing
                    end)

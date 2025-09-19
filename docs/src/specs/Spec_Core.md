@@ -56,18 +56,24 @@ Purpose: Core particle system types, math utilities, simple integrators, and for
   - `layers::ForcesTuple` where each layer is a concrete potential (e.g., `LennardJones`, `Coulomb`).
 - Generic multimethod hooks:
   - `compute_forces!(pot, sys::System)` must be implemented by each potential.
-  - `compute_all_forces!(sys::System, ff::ForceField)`
+- `compute_all_forces!(sys::System, ff::ForceField)`
     - Resets `sys.forces` to zero element and accumulates contributions from each layer in `ff.layers`, followed by bonded `sys.specific_potentials`.
     - Requires per-layer neighbor lists to be prepared beforehand (e.g., via `Neighbors.build_all_neighbors!`).
   - `compute_all_forces!(sys::System)`
     - Uses the `sys.forcefield`; throws if none is attached.
-
-## Integrators
+- `compute_potential_energy(sys::System, ff::ForceField)` / `compute_potential_energy(sys::System)`
+  - Ensures neighbor information is up to date and returns the scalar potential energy from the `ForceField` layers and any bonded interactions.
 
 - `AbstractIntegrator`
   - Marker supertype for all time integration / minimisation schemes.
-- `integrate!(integrator::AbstractIntegrator, system::System, nsteps; kwargs...)`
-  - Primary interface each integrator must overload. Contracts for keywords (e.g. `callback`) are defined by the concrete implementation.
+- `integrate!(integrator::AbstractIntegrator, system::System, nsteps; callback=nothing, kwargs...)`
+  - Drives the integration loop: rebuilds neighbor lists via `rebuild_neighbors!`, calls `step!(integrator, system)`, and invokes the optional callback. Callbacks receive `(system, step, integrator)` and may return `false` to halt early. The attached `ForceField` stores and maintains its own master neighbour list when pair potentials are present.
+- `step!(integrator::AbstractIntegrator, system::System)`
+  - Each concrete integrator implements one-step updates; return value is ignored.
+- `rebuild_neighbors!(system, args...; kwargs...)`
+  - Hook for neighbor maintenance. `Verlet.Neighbors` provides methods for `MasterNeighborList`.
+- `stop_requested(integrator::AbstractIntegrator)`
+  - Integrators may signal convergence/termination via this query (default `false`).
 - `potential_energy(system::System{T}, forces::Function) -> T`
   - Expects `forces(R; return_potential=true) => (F, U)`; errors if unsupported.
 

@@ -110,7 +110,7 @@ dt = 0.05
 energies = Float64[]
 vv = VelocityVerlet(dt)
 integrate!(vv, sys, 200;
-           callback = (sys, step) -> begin
+           callback = (sys, step, _) -> begin
                push!(energies, kinetic_energy(sys) + ho_energy(sys, pot))
                return nothing
            end)
@@ -130,15 +130,6 @@ using Verlet, StaticArrays
 box = CubicBox(20.0)
 R = [@SVector randn(3) for _ in 1:100]
 wrap_positions!(R, box)
-sys = System(
-    R,
-    [@SVector(zeros(3)) for _ in R],
-    [@SVector(zeros(3)) for _ in R],
-    ones(length(R)),
-    box,
-    ones(Int, length(R)),
-    Dict(1 => :A)
-)
 
 # 2. Define a Lennard-Jones potential
 rc = 2.5
@@ -148,16 +139,27 @@ lj = Verlet.Potentials.LennardJones(
     0.5
 )
 
-# 3. Create a ForceField
+# 3. Create a ForceField and system
 ff = Verlet.Neighbors.ForceField((lj,))
+sys = System(
+    R,
+    [@SVector(zeros(3)) for _ in R],
+    [@SVector(zeros(3)) for _ in R],
+    ones(length(R)),
+    box,
+    ones(Int, length(R)),
+    Dict(1 => :A);
+    forcefield=ff
+)
 
-# 4. Build neighbor lists and compute forces
-master_skin = 0.5
-master_nl = Verlet.Neighbors.MasterNeighborList(sys; cutoff=rc, skin=master_skin)
-Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys)
+# 4. Compute forces — the ForceField maintains its master neighbor list
 Verlet.Neighbors.compute_all_forces!(sys, ff)
 
 @show sys.forces[1]
+
+dt = 0.01
+vv = VelocityVerlet(dt)
+integrate!(vv, sys, 10)
 ```
 
 ### Neighbor List Methods
@@ -176,13 +178,6 @@ Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys, method=:bruteforce)
 - [`build_master_neighborlist!`](@ref) — construct a new master neighbor list.
 - [`wrap_positions!`](@ref) — enforce periodic wrapping of coordinates.
 
-vv = VelocityVerlet(dt)
-for step in 1:10
-    Verlet.Neighbors.build_all_neighbors!(master_nl, ff, sys)
-    integrate!(vv, sys, 1)
-end
-```
-
 ## Next Steps
 
 Check out the \[Guide → Constrained Dynamics](@ref constraints-guide) section to learn how to:
@@ -190,60 +185,6 @@ Check out the \[Guide → Constrained Dynamics](@ref constraints-guide) section 
 - Set up bond constraints with [`DistanceConstraints`](@ref)
 - Run constrained dynamics with [`velocity_verlet_shake_rattle!`](@ref)
 
-
-## ForceField API for Potentials
-
-The recommended way to handle pair potentials like Lennard-Jones is with the `ForceField` API. This provides a flexible way to combine multiple potentials and uses an efficient neighbor list implementation.
-
-```@example
-using Verlet, StaticArrays
-
-# 1. Define a Lennard-Jones potential
-box = CubicBox(20.0)
-R = [@SVector randn(3) for _ in 1:100]
-wrap_positions!(R, box)
-lj = LennardJones(
-    PairTable(fill(LJPair(1.0, 1.0, 2.5), (1, 1))),
-    Tuple{T_Int,T_Int}[],
-    0.5
-)
-
-# 2. Create a ForceField
-ff = ForceField((lj,))
-
-# 3. Set up the system with the force field
-sys = System(
-    R,
-    [@SVector(zeros(3)) for _ in R],
-    [@SVector(zeros(3)) for _ in R],
-    ones(length(R)),
-    box,
-    ones(Int, length(R)),
-    Dict(1 => :A);
-    forcefield=ff
-)
-
-# 4. Build neighbor lists and compute forces
-master_skin = 0.5
-build_all_neighbors!(ff, sys, master_skin)
-compute_all_forces!(sys, ff)
-
-@show sys.forces[1]
-```
-
-### Neighbor List Methods
-
-You can choose the neighbor list algorithm with the `method` keyword in `build_all_neighbors!`:
-- `:cells` (default): Fast `O(N)` cell-based algorithm.
-- `:bruteforce`: Slower `O(N^2)` algorithm for debugging.
-- `:all_pairs`: Includes all pairs, ignoring cutoffs.
-
-```julia
-build_all_neighbors!(ff, sys, master_skin, method=:bruteforce)
-```
-
-- [`build_master_neighborlist`](@ref) — construct a new master neighbor list.
-- [`wrap_positions!`](@ref) — enforce periodic wrapping of coordinates.
 
 ## Further Notes
 

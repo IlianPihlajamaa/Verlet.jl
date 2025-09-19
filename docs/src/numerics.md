@@ -2,7 +2,7 @@
 
 ## Constraint Tolerances and Thermostat Parameters
 
-When using [`langevin_baoab_constrained!`](@ref), the SHAKE and RATTLE solvers enforce
+When using [`LangevinBAOABConstrained`](@ref Verlet.Integrators.LangevinBAOABConstrained), the SHAKE and RATTLE solvers enforce
 distance constraints up to the tolerance specified in [`DistanceConstraints`](@ref).
 
 ### Interplay with `γ` and `T`
@@ -31,7 +31,7 @@ and use this value in temperature calculations.
 
 ### Reproducibility
 
-The stochastic step uses the provided RNG.
+The stochastic step uses the RNG stored in the integrator instance.
 Set a fixed seed (e.g. `rng = MersenneTwister(1234)`) in tests or benchmarks for reproducibility.
 
 ---

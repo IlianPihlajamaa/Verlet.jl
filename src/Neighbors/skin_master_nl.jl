@@ -1,6 +1,8 @@
 
 using LinearAlgebra
 using StaticArrays
+import ..Core
+import ..Core: System, rebuild_neighbors!, maybe_rebuild
 
 
 @inline function _wrap_frac!(sf::MVector{D,T}) where {D,T}
@@ -73,6 +75,7 @@ mutable struct MasterNeighborList{D,T}
     head::Vector{Int}
     next::Vector{Int}
 end
+
 
 function Base.show(io::IO, nl:: MasterNeighborList{D,T}) where {D,T}
     print(io,
@@ -193,8 +196,42 @@ function rebuild!(nl::MasterNeighborList{D,T}, positions, box; method::Symbol=:c
     return nl
 end
 
+function Core.maybe_rebuild(system::System, nl::MasterNeighborList; kwargs...)
+    positions = system.positions
+    if length(nl.r0) != length(positions)
+        return rebuild_neighbors!(system, nl; kwargs...)
+    end
 
-fractional(box, ri) = box.L \ ri  # dispatch on ORTHO
+    skin = nl.skin
+    skin_half = skin / 2
+    threshold2 = skin_half * skin_half
+
+    max_disp2 = _max_displacement2(positions, nl.r0, system.box)
+    nl.max_disp2 = max(nl.max_disp2, max_disp2)
+
+    if max_disp2 > threshold2
+        return rebuild_neighbors!(system, nl; kwargs...)
+    end
+
+    return nl
+end
+
+function _max_displacement2(current, reference, box)
+    vec_type = eltype(reference)
+    scalar_T = eltype(vec_type)
+    isempty(current) && return zero(scalar_T)
+
+    max_disp2 = zero(scalar_T)
+    @inbounds for i in eachindex(current)
+        disp = current[i] - reference[i]
+        disp = minimum_image(disp, box)
+        max_disp2 = max(max_disp2, dot(disp, disp))
+    end
+    return max_disp2
+end
+
+
+fractional(box, ri) = box.L \ ri 
 
 function _build_pairs_cells!(
     pairs::Vector{SVector{2,Int}},

@@ -2,7 +2,7 @@
 export HarmonicBond, Bond
 export HarmonicAngle, Angle
 export PeriodicDihedral, Dihedral
-import ..Core: compute_forces!, System
+import ..Core: compute_forces!, compute_potential_energy, System
 
 
 # Concrete implementations of bonded potentials
@@ -65,6 +65,12 @@ function compute_forces!(bond::Bond, system)
     system.forces[bond.j] += f_vec
 end
 
+function compute_potential_energy(bond::Bond, system)
+    vec_ij = system.positions[bond.j] - system.positions[bond.i]
+    r = norm(vec_ij)
+    return potential_energy(bond.potential, r)
+end
+
 # Harmonic Angle
 function potential_energy(angle::HarmonicAngle, θ)
     dθ = θ - angle.θ0
@@ -93,6 +99,15 @@ function compute_forces!(angle::Angle, system)
     system.forces[angle.i] += f_i
     system.forces[angle.k] += f_k
     system.forces[angle.j] -= (f_i + f_k)
+end
+
+function compute_potential_energy(angle::Angle, system)
+    r_ji = system.positions[angle.i] - system.positions[angle.j]
+    r_jk = system.positions[angle.k] - system.positions[angle.j]
+    cos_theta = dot(r_ji, r_jk) / (norm(r_ji) * norm(r_jk))
+    cos_theta = clamp(cos_theta, -1.0, 1.0)
+    theta = acos(cos_theta)
+    return potential_energy(angle.potential, theta)
 end
 
 
@@ -140,4 +155,24 @@ end
 
 function compute_forces!(dihedral::Dihedral, system::System{T,IT,D}) where {T,IT,D}
     throw(DomainError(D, "Periodic dihedral forces require 3 spatial dimensions; got D=$D."))
+end
+
+function compute_potential_energy(dihedral::Dihedral, system::System{T,IT,3}) where {T,IT}
+    r_ij = system.positions[dihedral.j] - system.positions[dihedral.i]
+    r_jk = system.positions[dihedral.k] - system.positions[dihedral.j]
+    r_kl = system.positions[dihedral.l] - system.positions[dihedral.k]
+
+    m = cross(r_ij, r_jk)
+    n = cross(r_jk, r_kl)
+    m_norm = norm(m)
+    n_norm = norm(n)
+    cos_phi = dot(m, n) / (m_norm * n_norm)
+    cos_phi = clamp(cos_phi, -1.0, 1.0)
+    sign_val = dot(r_ij, n) <= 0 ? one(T) : -one(T)
+    ϕ = acos(cos_phi) * sign_val
+    return potential_energy(dihedral.potential, ϕ)
+end
+
+function compute_potential_energy(dihedral::Dihedral, system)
+    return zero(eltype(system.positions[1]))
 end

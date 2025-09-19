@@ -12,19 +12,22 @@ Verlet.Integrators.ConjugateGradient
 
 - `VelocityVerlet(dt; wrap=false)`
   - Fields: timestep `dt`, periodic wrapping flag.
-  - `integrate!(VelocityVerlet, system, nsteps; callback=nothing)` performs
+  - `integrate!(VelocityVerlet, system, nsteps; callback)` performs
     velocity-Verlet integration using the `ForceField` attached to `system`;
-    the callback receives `(system, step)` and may return `false` to halt early.
+    the callback (if provided) receives `(system, step, integrator)` and may
+    return `false` to halt early.
 - `ConjugateGradient(energy; tol=1e-8, alpha0=1.0, min_alpha=1e-8, c1=1e-4, wrap=true)`
   - Implements non-linear Polak–Ribière conjugate-gradient minimisation with
     Armijo backtracking. The `energy` callable must accept the `system` and
     return the scalar potential energy. `integrate!` treats `nsteps` as the
-    maximum number of line-search iterations.
+    maximum number of line-search iterations; the integrator exposes its current
+    energy via `integrator.state.energy`.
 
 ## Behaviour & Invariants
 
 - `integrate!` on each integrator mutates the supplied `System` in place and
-  always updates `system.forces` with the most recent evaluation.
+  always updates `system.forces` with the most recent evaluation. The associated
+  `ForceField` maintains any neighbour lists it requires.
 - Callbacks returning `false` stop integration early without error.
 - Negative `nsteps` raise `ArgumentError`.
 - Periodic wrapping is optional (`wrap=true` wraps positions after each update).
