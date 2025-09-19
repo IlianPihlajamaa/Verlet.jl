@@ -38,8 +38,8 @@ function Verlet.Core.compute_forces!(pot::Springs, sys::System)
 end
 
 box = CubicBox(5.0)
-R = [@SVector randn(3) for _ in 1:8]; wrap_positions!(R, box)
-sys = System(R, fill(@SVector zeros(3),8), fill(@SVector zeros(3),8), ones(8), box, ones(Int,8), Dict(1=>:A);
+R = [SVector{3}(randn(), randn(), randn()) for _ in 1:8]; wrap_positions!(R, box)
+sys = System(R, fill(SVector{3}(0.0, 0.0, 0.0),8), fill(SVector{3}(0.0, 0.0, 0.0),8), ones(8), box, ones(Int,8), Dict(1=>:A);
            forcefield=ForceField((Springs(1.0),)))
 
 integrator = Verlet.Integrators.LangevinBAOAB(0.001; γ=1.0, temp=1.0, rng=MersenneTwister(1))

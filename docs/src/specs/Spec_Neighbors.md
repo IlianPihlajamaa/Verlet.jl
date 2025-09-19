@@ -1,106 +1,62 @@
 # Spec: Module `Verlet.Neighbors`
 
-Purpose: Efficient neighbor list construction and orchestration for force evaluation.
+Purpose: Construct Verlet neighbour lists, manage shared neighbour state for forcefields, and provide utilities for validating pair selection.
 
-## Types
+## Core types
+- `struct NeighborPair{F<:AbstractPotentialPair, IntT<:Integer}` stores one `(i, j)` pair together with its per-type parameters `pair::F`.
+- `struct PotentialNeighborList{F, IntT}` wraps `neighbors::Vector{NeighborPair{F, IntT}}`; pair potentials create instances via `PotentialNeighborList(eltype(params.table))` so the stored element type matches their parameter table.
+- `mutable struct ForceField{Layers}`
+  - Fields: `layers::Layers`, `master::Any`, `master_method::Symbol`.
+  - Constructor: `ForceField(layers; method=:cells)` initialises `master` to `nothing` (pair-potentials present) or `EmptyNeighborList()`.
+  - Specialised `prepare_neighbors!(ff::ForceField, sys::System)` (extending `Verlet.Core.prepare_neighbors!`) ensures a `MasterNeighborList` exists, updates its `cutoff`/`skin`, rebuilds if needed, and then calls `build_neighbors_from_master!` for each pair potential in `layers`.
+- `struct EmptyNeighborList end` acts as a sentinel when no pair potentials are present.
 
-- `struct NeighborPair{F<:AbstractPotentialPair, IntT<:Integer}`
-  - `i::IntT`, `j::IntT`, `pair::F` (per-pair parameters).
-- `const PotentialNeighborList{F} = StructArray{NeighborPair{F,T_Int}} where {F<:AbstractPotentialPair}`
-  - Per-potential neighbor container (StructArray-backed for SoA layout).
+## Master neighbour list
 - `mutable struct MasterNeighborList{D,T}`
-  - Tracks `cutoff`, `skin`, and a `pairs::Vector{SVector{2,Int}}` holding unique `(i<j)` candidates within `cutoff + skin` using minimum-image distances.
-  - Stores reference positions (`r0`), displacement bounds, the active cell grid shape `ncells`, and reusable `head`/`next` buffers for the cell build.
-  - Constructors: `MasterNeighborList(sys; cutoff, skin)` or `MasterNeighborList(positions, box; cutoff, skin)`.
-- Helper: `brute_force_pairs(sys_or_positions, box_or_cutoff, cutoff)` returns the set of `(i,j)` pairs within the provided cutoff using an `O(N^2)` sweep (useful for validation).
+  - Fields: `cutoff`, `cutoff2`, `skin`, `rskin2`, `pairs::Vector{SVector{2,Int}}`, `r0::Vector{SVector{D,T}}`, `max_disp2::T`, `nbuilds::Int`, `ncells::NTuple{D,Int}`, and reusable buffers `head::Vector{Int}`, `next::Vector{Int}` for the cell-linked build.
+  - Constructors: `MasterNeighborList(sys::System; cutoff, skin)` and `MasterNeighborList(positions, box; cutoff, skin)`.
+  - `rebuild!(nl, sys_or_positions; method=:cells, cutoff=nl.cutoff)` refreshes stored pairs using either the cell-linked sweep, a bruteforce fallback (`:bruteforce`), or an all-pairs builder (`:all_pairs`). Buffers are resized as needed while retaining allocations between calls.
+  - `build_master_neighborlist!(nl, sys; r_verlet, method=:cells)` converts the requested Verlet radius to an internal cutoff (`max(0, r_verlet - nl.skin)` except for `:all_pairs`) before delegating to `rebuild!`.
+- `rebuild_neighbors!(system::System, master::MasterNeighborList; kwargs...)` extends `Verlet.Core.rebuild_neighbors!` and simply calls `build_all_neighbors!(master, system.forcefield, system; kwargs...)`.
+- `maybe_rebuild(system::System, master::MasterNeighborList; kwargs...)` (defined here via `Core.maybe_rebuild`) measures the maximum squared displacement of particles since `r0`; when it exceeds `(skin/2)^2`, the neighbour list is rebuilt.
 
-## Building neighbors
+## Building per-potential neighbours
+- `build_neighbors_from_master!(pot::AbstractPairPotential, sys::System, master::MasterNeighborList)` clears `pot.neighborlist`, iterates `master.pairs`, applies minimum-image displacements, skips `is_excluded(pot, i, j)`, and keeps neighbours within `(rc + pot.skin)^2`.
+- `is_excluded(pot::AbstractPairPotential, i, j)` performs a simple tuple-membership test on `pot.exclusions` (overridable for efficiency).
+- `build_all_neighbors!(master::MasterNeighborList, ff::ForceField, sys::System; method=:cells)`
+  - Collects pair potentials from `ff.layers`.
+  - Ensures the master list covers the largest `(rc + skin)` amongst them.
+  - Rebuilds each potential’s neighbour list from `master`.
 
-- `build_master_neighborlist!(master, positions_or_sys, box_or_kwargs; r_verlet, method=:cells)`
-  - Purpose: Refresh `master.pairs` with unique `(i<j)` candidates consistent with the requested Verlet radius `r_verlet`.
-  - `master.cutoff` is updated to `max(0, r_verlet - master.skin)` and `master.r0` holds the reference positions used for future displacement checks.
-  - Methods:
-    - `:cells` (default): cell-list algorithm using the internal `ncells`, `head`, and `next` buffers, expected `O(N)`.
-    - `:bruteforce`: `O(N^2)` sweep that applies the cutoff directly; helpful for validation.
-    - `:all_pairs`: fills every `(i<j)` pair ignoring the cutoff (testing / debugging).
-- `rebuild!(master, sys_or_positions, box; method=:cells, cutoff=master.cutoff)`
-  - Lower-level entry point called by `build_master_neighborlist!`; accepts either a `System` or raw positions plus box.
-- `build_cellgrid(...)`, `rebin!(...)`
-- `build_cellgrid(...)`, `rebin!(...)`
-  - Utilities for the cell-list implementation (internal surface area; caller rarely uses directly).
+## Supporting utilities
+- `brute_force_pairs(sys::System, cutoff)` (and the `positions, box, cutoff` variant) returns all `(i, j)` pairs within the squared cutoff using the minimum-image convention; useful for validation.
+- `_build_pairs_cells!`, `_build_pairs_bruteforce!`, and `_build_pairs_allpairs!` (internal) implement the various pair-generation strategies.
+- Distance helpers `displacement` and `distance2_minimum_image` provide allocation-free minimum-image calculations for `SVector` inputs.
 
-## ForceField integration
+## Cell-grid helper
+- `struct CellGrid{D,IT,T}`
+  - Fields: `L`, `cell_size`, `dims`, `heads`, `next`.
+  - Built via `build_cellgrid(R, box; cell_size)` which chooses a uniform grid no finer than the requested `cell_size` and immediately calls `rebin!`.
+  - `rebin!(grid, R, box)` resets `heads`/`next`, bins positions into periodic cells, and can be reused between builds.
 
-- `build_neighbors_from_master!(pot::AbstractPairPotential, sys::System, master::MasterNeighborList)`
-  - Populates `pot.neighborlist` using `master.pairs` and per-type pair parameters.
-  - Computes the current squared distance on the fly (minimum-image) and includes `(i,j)` when not excluded and `r2 < (p.rc + pot.skin)^2`.
-- `build_all_neighbors!(master, ff::ForceField, sys::System; method=:cells)`
-  - Computes a master list with `r_verlet = maximum(max(p.rc) + pot.skin for pot in ff.layers)` (over all layer parameter tables), then builds per-layer lists.
-
-## Exclusions
-
-- `is_excluded(pot::AbstractPairPotential, i, j)`
-  - Basic tuple membership check on `pot.exclusions` (callers can precompute or specialize for performance).
-
-## Invariants
-
-- `master.pairs` contains unique `(i<j)` pairs; no self-pairs; the stored cutoff equals the requested Verlet radius minus `skin`.
-- Per-potential neighbor lists are empty!+push!-rebuilt; capacity may be retained.
-
-## Performance
-
-- Cell-list path is expected `O(N)` with good binning; bruteforce is `O(N^2)`.
-- StructArray neighbors enable tight loops in potentials (good cache behavior).
+## Behaviour & invariants
+- `master.pairs` always stores unique `(i < j)` pairs.
+- `master.r0` matches the particle positions when the list was last rebuilt; `max_disp2` records the largest squared displacement seen since then.
+- Per-potential neighbour lists are cleared before reuse so capacity is retained but contents are refreshed every rebuild.
+- The `ForceField` keeps the most recent `MasterNeighborList` instance in `ff.master`; users may supply a pre-built master list when calling `build_all_neighbors!` directly.
 
 ## Example
-
 ```julia
 using Verlet, StaticArrays
-box = CubicBox(10.0)
-R = [@SVector randn(3) for _ in 1:128]; wrap_positions!(R, box)
-sys = System(R, fill(@SVector zeros(3), 128), fill(@SVector zeros(3), 128), ones(128), box, ones(Int,128), Dict(1=>:A))
 
-lj = begin
-  params = PairTable(fill(LJPair(1.0, 1.0, 2.5), (1,1)))
-  Verlet.Potentials.LennardJones(params, Tuple{Int,Int}[], 0.5)
-end
+box = CubicBox(8.0)
+R = [SVector{3}(randn(), randn(), randn()) for _ in 1:16]; wrap_positions!(R, box)
+sys = System(R, fill(SVector{3}(0.0, 0.0, 0.0), 16), fill(SVector{3}(0.0, 0.0, 0.0), 16), ones(16), box,
+             ones(Int, 16), Dict(1 => :A))
+
+params = PairTable(fill(LJPair(1.0, 1.0, 2.5), (1, 1)))
+lj = Verlet.Potentials.LennardJones(params, Tuple{Int,Int}[], 0.3)
 ff = ForceField((lj,))
-master = MasterNeighborList(sys; cutoff=2.5, skin=0.5)
-build_all_neighbors!(master, ff, sys; method=:cells)
+master = MasterNeighborList(sys; cutoff=2.5, skin=0.3)
+build_all_neighbors!(master, ff, sys)
 ```
-
-## Cell Grid Details
-
-- `CellGrid{D,IT,T}` fields:
-  - `L::T`: cubic box length; assumed consistent with positions’ units.
-  - `cell_size::T`: effective uniform cell width actually used for binning.
-  - `dims::NTuple{D,IT}`: number of cells along each axis (each ≥ 1).
-  - `heads::Vector{IT}`: length `prod(dims)`; head index per cell (`0` sentinel = empty).
-  - `next::Vector{IT}`: length `N`; intrusive linked-list “next” pointer per particle (`0` = end).
-- Build and rebin:
-  - `build_cellgrid(R, box; cell_size)` constructs a grid sized so that the effective width `cs_eff = L / floor(L/cell_size) ≥ cell_size` and immediately `rebin!`s the positions.
-  - `rebin!(grid, R, box)` resets `heads` and `next` and push-fronts each particle index `i` into its cell list using periodic mapping.
-- Indexing and periodicity:
-  - Positions are mapped to `[0, L)` via `x0 = x + 0.5L; x0 -= floor(x0 / L) * L`, then to cell indices `1..n` via `floor(x0/cell_size)+1` clamped to `[1,n]`.
-  - Cell linear index computed via row-major strides over `dims`.
-  - A `3^D`-neighbor stencil around each base cell is enumerated; offsets use periodic wrap per axis.
-
-## Master List Algorithm
-
-- `:cells` (default):
-  - `_choose_cell_grid` selects a uniform `dims` tuple so that each cell edge is at most `cutoff + skin`.
-  - Particles are assigned to cells by fractional coordinates and stored in intrusive lists via the `head`/`next` buffers.
-  - For each base cell, the algorithm visits the `3^D` neighbor stencil with wraparound and emits `(i, j)` with `i < j` whenever the minimum-image squared distance is ≤ `(cutoff + skin)^2`.
-  - `ncells`, `head`, and `next` are kept on the list object and reused between builds; buffers resize only when the particle count or grid shape changes.
-- `:bruteforce`: nested loops for `i<j`, computing minimum-image distances directly and respecting the same cutoff radius (expected `O(N^2)`).
-- `:all_pairs`: nested loops for `i<j` that bypass the cutoff entirely; useful for debugging and consistency tests.
-
-## Sorting and Uniqueness
-
-- All methods generate unique `(i<j)` pairs by construction; no post-processing `sort!`/`unique!` is performed.
-
-## Assumptions and Invariants
-
-- Positions are `SVector{D,T}` for arbitrary `D ≥ 1` (default `D=3`).
-- Minimum-image distances under the provided `CubicBox` determine pair inclusion.
-- `master.pairs` is cleared before each rebuild; buffers grow amortized.

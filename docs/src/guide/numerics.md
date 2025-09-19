@@ -1,87 +1,118 @@
-# NVT (Langevin BAOAB) Thermostat
+# Numerical Notes & Best Practices
 
-This guide shows how to run **constant-temperature (NVT)** dynamics using the
-`Verlet.Integrators.LangevinBAOAB` integrator and how to monitor/adjust the
-system temperature with a few convenience tools.
+This page collects practical advice for choosing timesteps, monitoring energy,
+and combining integrators with thermostats in Verlet.jl.
 
-## Why BAOAB?
+## Timestep heuristics
 
-- Excellent configurational sampling compared to naive Euler–Maruyama.
-- Robust for larger `dt` at a given target `T`.
-- Exact Ornstein–Uhlenbeck (OU) substep and only **one force evaluation per step**.
-- With `γ = 0`, BAOAB reduces to velocity–Verlet.
+- Start by scanning the largest timestep that conserves total energy for an
+  unconstrained, microcanonical (NVE) run. Monitor `kinetic_energy + potential`
+  over several hundred steps.
+- Holonomic constraints (SHAKE/RATTLE) allow roughly 2× larger timesteps compared
+  with fully flexible bonds.
+- Stiff bonded terms or strong Lennard-Jones overlaps may necessitate smaller
+  timesteps; consider energy minimisation (e.g. conjugate gradient) before
+  production dynamics.
 
-## Quick Start
+## Energy monitoring pattern
 
-```julia
-using Random, StaticArrays, Verlet
+```@example numerics
+using StaticArrays, Verlet
 
-struct Springs
+struct Hooke
     k::Float64
 end
 
-function Verlet.Core.compute_forces!(pot::Springs, sys::System)
+function Verlet.Core.compute_forces!(pot::Hooke, sys::System)
     @inbounds for i in 1:natoms(sys)
         sys.forces[i] += -pot.k * sys.positions[i]
     end
     return sys
 end
 
-N, D = 64, 3
-positions = [@SVector zeros(D) for _ in 1:N]
-velocities = [@SVector randn(D) for _ in 1:N]
-forces = [@SVector zeros(D) for _ in 1:N]
-masses = ones(N)
 box = CubicBox(10.0)
-types = ones(Int, N)
+positions = [SVector{3}(1.0, 0.0, 0.0)]
+velocities = [SVector{3}(0.0, 1.0, 0.0)]
+forces = [SVector{3}(0.0, 0.0, 0.0)]
+masses = [1.0]
+types = [1]
 type_names = Dict(1 => :A)
-ff = ForceField((Springs(0.2),))
-ps = System(positions, velocities, forces, masses, box, types, type_names; forcefield=ff)
+hooke = Hooke(1.0)
+ff = ForceField((hooke,))
+sys = System(positions, velocities, forces, masses, box, types, type_names;
+             forcefield = ff)
 
-dt = 0.005      # time step
-γ  = 1.0        # friction [1/time]
-Tt = 1.5        # target temperature (kB = 1.0 here)
-rng = MersenneTwister(2025)
+vv = VelocityVerlet(0.05)
+energies = Float64[]
+integrate!(vv, sys, 400; callback = (system, step, _) -> begin
+    U = 0.5 * hooke.k * sum(abs2, system.positions[1])
+    push!(energies, kinetic_energy(system) + U)
+    return nothing
+end)
 
-# Optional: bring KE near the target quickly
-Verlet.Thermostats.velocity_rescale!(ps, Tt; kB=1.0)
-
-integrator = Verlet.Integrators.LangevinBAOAB(dt; γ=γ, temp=Tt, rng=rng)
-integrate!(integrator, ps, 2_000)
-
-@info "Instantaneous T" Verlet.Thermostats.instantaneous_temperature(ps; kB=1.0)
+(round(minimum(energies), digits = 6), round(maximum(energies), digits = 6))
 ```
 
-## Choosing `γ` and `dt`
+Use a similar callback to validate new potentials or parameter sets.
 
-- **Units:** ensure `γ` is in `1/time` and `kB*T` in energy, consistent with `r`, `v`, and `m`.
-- Start with `γ*dt ≈ 0.1–1`. Larger values overdamp dynamics (OK for sampling; poor for kinetics).
-- Keep `dt` similar to your velocity-Verlet choice at the same force field. BAOAB is often **at least as stable**.
+## Thermostats
 
-## Algorithm Sketch
+- `Verlet.Integrators.LangevinBAOAB` is a good default for canonical (NVT)
+  sampling; it preserves configurational accuracy and requires only one force
+  evaluation per step.
+- Set `γ*dt` between `0.1` and `1.0`. Smaller values retain more ballistic
+  character; larger values overdamp dynamics but still sample the Boltzmann
+  distribution.
+- Always supply an explicit RNG (`rng = MersenneTwister(seed)`) for reproducible
+dynamics.
+- For constrained systems, switch to `LangevinBAOABConstrained` with the same
+  `DistanceConstraints` object used by SHAKE/RATTLE.
 
-BAOAB splits each step into **B (half kick) → A (half drift) → O (OU) → A → B**. The OU substep uses the exact update
-`v ← c*v + s*ξ` with `c = exp(-γ*dt)` and `s = √((1 - c^2) * kB*T / m)`. See the integrator docstring for further details,
-including numerics for small `γ*dt`.
+## Temperature estimation
 
-## Diagnostics
+```
+T_inst = 2 * kinetic_energy(sys) / (kB * dof)
+```
 
-- `Verlet.Thermostats.instantaneous_temperature(ps; kB)` returns the current kinetic temperature using equipartition (`dof = N*D` for now).
-- Time-average `Verlet.Thermostats.instantaneous_temperature` over many steps (or save to disk) to validate the thermostat.
+Use `Verlet.Thermostats.instantaneous_temperature(sys; kB)` for convenience.
+Remember to adjust the degrees of freedom:
 
-## Pitfalls & Tips
+```@example numerics
+cons = DistanceConstraints([(1,2)], [1.0])
+Verlet.Thermostats.degrees_of_freedom(sys; constraints = cons, remove_com = true)
+```
 
-- **Mass heterogeneity:** compute OU noise per particle using its mass; do **not** reuse a single scale across species.
-- **Small systems:** temperature fluctuates strongly; judge convergence statistically.
-- **Reproducibility:** always pass an explicit RNG when constructing `LangevinBAOAB`.
-- **Not a thermostat:** `Verlet.Thermostats.velocity_rescale!` is useful for a single "KE nudge" but does not produce the correct canonical distribution.
+## Random initial velocities
 
-## API Reference
+Draw initial velocities compatible with your target temperature:
+
+```@example numerics
+using Random
+Random.seed!(123)
+Ttarget = 1.5
+for i in eachindex(sys.velocities)
+    sys.velocities[i] = sqrt(Ttarget) * SVector{3}(randn(), randn(), randn())
+end
+Verlet.Thermostats.remove_com_motion!(sys; which = :velocity)
+```
+
+## Troubleshooting
+
+- **Exploding energies:** reduce the timestep, minimise initial structures, or
+  double-check force signs. Large overlaps can produce huge forces.
+- **Constraint failures:** diagnose with `constraint_residuals`. Raise
+  `maxiter`, loosen `tol`, or reduce the timestep.
+- **Neighbour rebuild storms:** increase the pair potential `skin` (e.g. from
+  `0.3` to `0.6`) so particles travel farther before triggering a rebuild.
+
+For a concrete thermostat example, see
+[Tutorial 4 · Thermostatted Dynamics](../tutorials/thermostat.md).
+
+## Integrator API
 
 ```@docs
+Verlet.Integrators.VelocityVerlet
+Verlet.Integrators.ConjugateGradient
 Verlet.Integrators.LangevinBAOAB
 Verlet.Integrators.LangevinBAOABConstrained
-Verlet.Thermostats.instantaneous_temperature
-Verlet.Thermostats.degrees_of_freedom
-Verlet.Thermostats.velocity_rescale!
 ```

@@ -10,15 +10,23 @@ makedocs(
     modules = [Verlet, Verlet.Core, Verlet.Neighbors, Verlet.Potentials, Verlet.Constraints, Verlet.Thermostats],
     format = Documenter.HTML(prettyurls = get(ENV, "CI", "false") == "true"),
     checkdocs = :public,
-        pages = [
+    pages = [
         "Home" => "index.md",
-        "Guide" => Any[
-            "Constrained Dynamics" => "guide/constraints.md",
+        "Tutorials" => Any[
+            "Tutorial 1 · Hello, Velocity Verlet" => "tutorials/quickstart.md",
+            "Tutorial 2 · Pair Potentials & Neighbour Lists" => "tutorials/pair_potentials.md",
+            "Tutorial 3 · Constraints in Practice" => "tutorials/constraints.md",
+            "Tutorial 4 · Thermostatted Dynamics" => "tutorials/thermostat.md",
+        ],
+        "How-to Guides" => Any[
+            "Building Systems" => "guide/system.md",
             "Forces & Potentials" => "guide/forces.md",
-            "Bonded Potentials" => "guide/bonded.md",
+            "Bonded Interactions" => "guide/bonded.md",
+            "Neighbour Lists" => "guide/neighbors.md",
+            "Constrained Dynamics" => "guide/constraints.md",
             "Numerical Notes" => "guide/numerics.md",
         ],
-        "Specs" => Any[
+        "Reference" => Any[
             "Overview" => "specs/Spec_Module_Index.md",
             "Top-level (Verlet)" => "specs/Spec_Verlet.md",
             "Core" => "specs/Spec_Core.md",
@@ -28,7 +36,7 @@ makedocs(
             "Thermostats" => "specs/Spec_Thermostats.md",
             "Electrostatics" => "specs/Spec_Electrostatics.md",
         ],
-        "API" => "api.md",
+        "API Reference" => "api.md",
     ],
 )
 

@@ -1,173 +1,98 @@
-# Constrained Dynamics (SHAKE/RATTLE)
+# Constrained Dynamics
 
-`@id constraints-guide
-`
+Distance constraints lock specific inter-particle separations, enabling longer
+timesteps and rigid fragments. Verlet.jl implements the classic SHAKE/RATTLE
+family and integrates with both plain velocity Verlet and the Langevin
+thermostat.
 
-Molecular simulations often require certain bond lengths (e.g. X–H bonds in water) to remain fixed.
-This enables **larger stable timesteps** and enforces realistic rigid-body structures.
+## Defining constraints
 
-Verlet.jl provides support for **holonomic distance constraints** using the
-classical **SHAKE** (positions) and **RATTLE** (velocities) algorithms.
+[`DistanceConstraints`](@ref Verlet.Constraints.DistanceConstraints) maps atom-index pairs to target lengths and solver tolerances.
 
-## Defining Constraints
+Create a constraint set by listing atom index pairs and their target lengths:
 
-Use [`DistanceConstraints`](@ref Verlet.Constraints.DistanceConstraints) to define a set of pairwise distance constraints:
+```@example constraints_guide
+using StaticArrays, LinearAlgebra, Verlet
 
-
-```@example constraints
-using Verlet, StaticArrays
-# A diatomic molecule with target bond length 1.0
-pairs   = [(1,2)]
-lengths = [1.0]
-cons = DistanceConstraints(pairs, lengths; tol=1e-10, maxiter=100)
+pairs   = [(1, 2), (2, 3)]
+lengths = [1.0, 1.0]
+cons = DistanceConstraints(pairs, lengths; tol = 1e-10, maxiter = 100)
 ```
 
-Arguments:
+- `tol` controls the acceptable squared residual `|‖r_i - r_j‖² - r₀²|`.
+- `maxiter` bounds the number of SHAKE/RATTLE correction sweeps per timestep.
+- Set `use_minimum_image = true` when constraints may straddle periodic
+  boundaries.
 
-- `pairs`: vector of `(i,j)` atom index pairs (1-based)
-- `lengths`: vector of target distances
-- `tol`: maximum squared violation tolerated (`|C_l|` units length²)
-- `maxiter`: maximum SHAKE/RATTLE iterations per step
-- `use_minimum_image`: apply minimum image convention under periodic boundaries
+## Applying constraints during integration
 
-!!! tip
-    For constraints across periodic boundaries, keep molecules whole and use
-    `use_minimum_image=true`.
+Two options are available:
 
-## Constrained Integrator
+1. [`velocity_verlet_shake_rattle!`](@ref Verlet.Constraints.velocity_verlet_shake_rattle!)
+   wraps the standard velocity-Verlet update with SHAKE (position projection) and
+   RATTLE (velocity projection).
+2. [`Verlet.Integrators.LangevinBAOABConstrained`](@ref) embeds the same
+   projections in the stochastic BAOAB scheme.
 
-The [`velocity_verlet_shake_rattle!`](@ref Verlet.Constraints.velocity_verlet_shake_rattle!) driver advances the system with constraints enforced:
+Both require a callable that returns forces for the updated positions. The force
+function should honour the `System` stored in the closure.
 
+```@example constraints_guide
+using StaticArrays, LinearAlgebra, Verlet
 
-```@example constraints
-using Verlet, StaticArrays, LinearAlgebra
-N, D = 2, 3
-positions = [@SVector zeros(D) for _ in 1:N]
-positions[2] = @SVector [1.2, 0.0, 0.0]   # initial bond slightly off
-velocities = [@SVector zeros(D) for _ in 1:N]
-forces = [@SVector zeros(D) for _ in 1:N]
+N = 2
+zero3 = SVector{3}(0.0, 0.0, 0.0)
+positions = [zero3, SVector{3}(1.05, 0.0, 0.0)]
+velocities = fill(zero3, N)
+forces = fill(zero3, N)
 masses = ones(N)
 box = CubicBox(10.0)
 types = ones(Int, N)
 type_names = Dict(1 => :A)
-sys = System(positions, velocities, forces, masses, box, types, type_names)
-cons = DistanceConstraints([(1,2)], [1.0])
-forces_func(R) = [@SVector zeros(D) for _ in R]  # no external forces
-for step in 1:100
-  velocity_verlet_shake_rattle!(sys, forces_func, 0.01, cons)
+ff = ForceField(())  # empty forcefield placeholder
+sys = System(positions, velocities, forces, masses, box, types, type_names;
+             forcefield = ff)
+
+forces_fn(R) = begin
+    _ = R
+    Verlet.Core.compute_all_forces!(sys)
+    sys.forces
 end
-d = sys.positions[1] - sys.positions[2]
-@show norm(d)  # ~1.0
+
+dt = 0.01
+velocity_verlet_shake_rattle!(sys, forces_fn, dt, DistanceConstraints([(1, 2)], [1.0]))
+round(norm(sys.positions[1] - sys.positions[2]), digits = 6)
 ```
 
-This integrator:
-1. Updates velocities (half step) and positions (drift).
-2. Applies **SHAKE** projection to enforce bond lengths.
-3. Recomputes forces.
-4. Completes velocity update.
-5. Applies **RATTLE** projection to enforce velocity constraints.
+## Diagnostics and utilities
 
-## Degrees of Freedom
+- [`constraint_residuals`](@ref Verlet.Constraints.constraint_residuals)
+  returns maximum and RMS residuals for both positions and velocities.
+- [`remove_com_motion!`](@ref Verlet.Constraints.remove_com_motion!) eliminates
+  centre-of-mass drift in velocity or position space, useful prior to applying
+  thermostats or barostats.
+- [`Verlet.Thermostats.degrees_of_freedom`](@ref) accepts the `constraints`
+  keyword so temperature estimators account for removed degrees of freedom.
 
-Constraints reduce the effective number of degrees of freedom (DoF).
-The [`degrees_of_freedom`](@ref Verlet.Thermostats.degrees_of_freedom) function accounts for:
+## Choosing tolerances
 
-- number of atoms × dimensions
-- minus one per constraint
-- minus dimensions if COM motion is removed
+- `tol = 1e-8` suffices for most biomolecular applications; tighten to `1e-10`
+  for high-precision energy conservation.
+- Increase `maxiter` when solving strongly coupled constraint networks (e.g.
+  rings). Failure to converge raises an error so you can respond appropriately.
 
+## Interplay with thermostats
 
-```@example constraints
-using StaticArrays
-N, D = 3, 3
-positions = [@SVector zeros(D) for _ in 1:N]
-velocities = [@SVector zeros(D) for _ in 1:N]
-forces = [@SVector zeros(D) for _ in 1:N]
-masses = ones(N)
-box = CubicBox(10.0)
-types = ones(Int, N)
-type_names = Dict(1 => :A)
-sys = System(positions, velocities, forces, masses, box, types, type_names)
-cons = DistanceConstraints([(1,2)], [1.0])
-dof = degrees_of_freedom(sys; constraints=cons, remove_com=true)
-@show dof
-```
+Thermostat updates that randomise velocities (e.g. BAOAB) must immediately be
+followed by RATTLE projection. The constrained Langevin integrator handles this
+internally; for custom schemes, call `apply_rattle!(sys, cons)` after modifying
+velocities.
 
-Correct DoF is essential for unbiased temperature and pressure estimators.
+## Further reading
 
-## Removing Center-of-Mass Motion
+- Ryckaert, Ciccotti & Berendsen (1977). *Numerical integration of the Cartesian
+  equations of motion of a system with constraints.*
+- Andersen (1983). *RATTLE: A "velocity" version of the SHAKE algorithm.*
 
-Use [`remove_com_motion!`](@ref Verlet.Constraints.remove_com_motion!) to zero the mass-weighted center-of-mass velocity or position.
-This prevents unphysical drift of the entire system.
-
-
-```@example constraints
-using StaticArrays
-N, D = 3, 3
-positions = [@SVector zeros(D) for _ in 1:N]
-velocities = [@SVector ones(D) for _ in 1:N]
-forces = [@SVector zeros(D) for _ in 1:N]
-masses = [1.0, 2.0, 3.0]
-box = CubicBox(10.0)
-types = ones(Int, N)
-type_names = Dict(1 => :A)
-sys = System(positions, velocities, forces, masses, box, types, type_names)
-remove_com_motion!(sys; which=:velocity)
-# After removal, COM velocity should be ~0
-Vcom = sum(sys.masses .* map(v -> v[1], sys.velocities)) / sum(sys.masses)
-@show Vcom
-```
-
-## Performance Notes
-
-- SHAKE/RATTLE typically converge in a few iterations for tree-like molecules.
-- For rings or stiff networks, increase `maxiter` or relax `tol`.
-- Always monitor constraint residuals if using larger timesteps.
-- Thermostat steps that randomize velocities should be followed by [`apply_rattle!`](@ref Verlet.Constraints.apply_rattle!).
-
-## Common Pitfalls
-
-- Constraints assume well-defined molecular topology. If your system uses PBC,
-
-  * ensure constrained atoms belong to the same molecule and do not cross cell
-    boundaries unexpectedly.
-  * A too-tight tolerance can lead to slow or failed convergence.
-  * DoF reduction is essential: forgetting to pass `constraints` or `remove_com`
-    to [`degrees_of_freedom`](@ref Verlet.Thermostats.degrees_of_freedom) will bias temperature estimates.
-
-## Further Reading
-
-- Ryckaert, Ciccotti & Berendsen (1977), *Numerical integration of the Cartesian
-  equations of motion of a system with constraints: molecular dynamics of n-alkanes*,
-  J. Comp. Phys. 23(3).
-- Andersen (1983), *RATTLE: A "velocity" version of the SHAKE algorithm for
-  molecular dynamics calculations*, J. Comp. Phys. 52(1).
-
-These classical references describe the original SHAKE and RATTLE algorithms
-implemented here.
-
-
-## Note on Particle Representation
-
-All positions, velocities, and forces are now represented as `Vector{SVector{D, T}}` for performance and type stability. Update your code and constraint definitions accordingly.
-
-## See Also
-
-- [`System`](@ref Verlet.Core.System): container for positions, velocities, and masses.
-- [`VelocityVerlet`](@ref Verlet.Integrators.VelocityVerlet): unconstrained Velocity-Verlet integrator.
-- [`degrees_of_freedom`](@ref Verlet.Thermostats.degrees_of_freedom): count effective translational degrees of freedom.
-- [`remove_com_motion!`](@ref Verlet.Constraints.remove_com_motion!): eliminate center-of-mass drift.
-
-For thermostatting with constraints, project velocities with
-[`apply_rattle!`](@ref Verlet.Constraints.apply_rattle!) after randomization steps to remain on the constraint manifold.
-
-## Next Steps
-
-You can now combine constrained dynamics with neighbor lists, Lennard-Jones forces,
-and thermostats. See the [Forces & Potentials](@ref) guide for force field setup.
-
----
-
-**Summary:** SHAKE/RATTLE constraints in Verlet.jl let you simulate rigid bonds,
-stabilize molecules, and safely increase integration timesteps. Use them with care,
-monitor convergence, and adjust tolerances as needed.
+For a step-by-step build, revisit
+[Tutorial 3 · Constraints in Practice](../tutorials/constraints.md).

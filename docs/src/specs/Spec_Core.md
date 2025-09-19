@@ -1,100 +1,68 @@
 # Spec: Module `Verlet.Core`
 
-Purpose: Core particle system types, math utilities, simple integrators, and force orchestration.
+Purpose: Foundational particle-system types, periodic-box utilities, abstract potential tags, and shared integration hooks.
 
 ## Constants
-
-- `T_Float = Float64`: Default floating type for numeric fields.
-- `T_Int = Int64`: Default integer type for indices/types.
-- `Dims = 3`: Default spatial dimensionality (APIs accept any `D`).
+- `T_Float = Float64`: default floating-point element type used by convenience constructors.
+- `T_Int = Int64`: default integer type for particle indices and type labels.
+- `Dims = 3`: default spatial dimensionality; most APIs work for any `D` through dispatch.
 
 ## Boxes
-
-- `abstract type AbstractBox{T<:AbstractFloat}`: Base for boundary conditions.
+- `abstract type AbstractBox{T<:AbstractFloat}`: supertype for boundary-condition containers.
 - `struct CubicBox{T<:AbstractFloat} <: AbstractBox{T}`
-  - Fields: `L::T` (box side length).
-  - `box_length(box::CubicBox) -> T`
-  - `minimum_image(Δ::AbstractVector, box::CubicBox)` and `minimum_image(Δ, L)`
-    - Wrap displacement to (−L/2, L/2] componentwise.
-  - `wrap_positions!(R::Vector{SVector{D,T}}, box::CubicBox{T})`
-    - In-place wrap of positions to primary cell using minimum image.
+  - Field: `L::T` (edge length of the cubic cell).
+  - `box_length(box::CubicBox) -> T` returns the stored length.
+  - `minimum_image(Δ::AbstractVector, box::CubicBox)` plus specialised `SVector` methods keep displacements in (−L/2, L/2] componentwise without allocations.
+  - `wrap_positions!(R::Vector{SVector{D,T}}, box::CubicBox{T})` wraps particle positions to the primary cell in place.
 
-## System and Particles
+## System container
+- `struct System{T<:AbstractFloat,IT<:Integer,Dims,BOX<:AbstractBox{T},FF}`
+  - Fields: `positions`, `velocities`, `forces` :: `Vector{SVector{Dims,T}}`; `masses::Vector{T}`; `box::BOX`; `types::Vector{IT}`; `type_names::Dict{IT,Symbol}`; `natoms::IT`; `specific_potentials::Tuple`; `forcefield::FF` (typically a `Neighbors.ForceField` or `nothing`).
+  - Constructor checks that all particle arrays share a common length `natoms`.
+- `natoms(sys::System)` and `natomtypes(sys::System)` expose counts derived from stored fields.
+- `kinetic_energy(sys::System{T}) -> T` computes `∑ₖ ½ mₖ ‖vₖ‖²` allocation-free.
 
-- `struct System{T<:AbstractFloat,IT<:Integer,Dims}`
-  - Fields:
-    - `positions::Vector{SVector{Dims,T}}`
-    - `velocities::Vector{SVector{Dims,T}}`
-    - `forces::Vector{SVector{Dims,T}}`
-    - `masses::Vector{T}`
-    - `box::AbstractBox{T}`
-    - `types::Vector{IT}`
-    - `type_names::Dict{IT,Symbol}`
-    - `natoms::IT` (derived at construction)
-    - `specific_potentials::Tuple` (bonded interactions)
-    - `forcefield`: object supplying `compute_forces!` (typically a `ForceField`) or `nothing`
-  - Invariants:
-    - All particle arrays have equal length `natoms`.
-    - `positions[i]`, `velocities[i]`, `forces[i]` are length-`Dims` `SVector`s.
-- `natoms(sys::System) -> Integer`
-- `natomtypes(sys::System) -> Int`
-- `kinetic_energy(sys::System{T}) -> T`
+## Potential & neighbour tags
+- `AbstractPotential`, `AbstractPairPotential`, `AbstractBondPotential`, `AbstractAnglePotential`, `AbstractDihedralPotential`, `AbstractImproperPotential`, and `AbstractPotentialPair` provide dispatch markers for concrete force implementations.
+- `abstract type AbstractNeighborList end` is a placeholder supertype; concrete lists live in `Verlet.Neighbors`.
 
-## Abstract Potential Tags
+## Force orchestration
+- `compute_forces!(pot::AbstractPotential, sys::System)` must be specialised by each potential; the Core fallback throws.
+- `prepare_neighbors!(ff, sys::System)` is a hook for neighbour-aware forcefields. The Core method returns `ff` unchanged; `Verlet.Neighbors` specialises it for its `ForceField` type.
+- `compute_all_forces!(sys::System, ff)`
+  - Fills `sys.forces` with zeros, calls `prepare_neighbors!`, then invokes `compute_forces!` across `ff.layers` followed by every entry in `sys.specific_potentials`.
+  - Returns the mutated `System` to support chaining.
+- `compute_all_forces!(sys::System)` delegates through `sys.forcefield`, raising an `ArgumentError` if none is attached.
+- `compute_potential_energy(sys::System, ff)` mirrors the force routine but accumulates scalar energy contributions via `compute_potential_energy(pot, sys)` (Core’s default for unknown potentials is zero).
+- `compute_potential_energy(sys::System)` again delegates through `sys.forcefield` with the same guard.
+- `potential_energy(system::System{T}, forces::Function) -> T` expects `forces(system.positions; return_potential=true) => (F, U)` and throws a descriptive error when the callable lacks that protocol.
 
-- `AbstractPotentialPair`, `AbstractPairPotential`, `AbstractBondPotential`, `AbstractAnglePotential`, `AbstractDihedralPotential`, `AbstractImproperPotential`.
-  - Marker types used by potentials for dispatch; no fields or behavior here.
+## Integration interface
+- `abstract type AbstractIntegrator end`: parent type for all integrators.
+- `integrate!(integrator::AbstractIntegrator, system::System, nsteps::Integer; callback=nothing, neighbor_kwargs...)`
+  - Validates `nsteps ≥ 0`; `nsteps == 0` returns immediately.
+  - Calls `step!(integrator, system)` for each iteration and invokes the optional callback with `(system, step, integrator)`; if the callback returns `false` or `stop_requested(integrator)` is `true`, the loop exits early.
+- `step!(integrator::AbstractIntegrator, system::System)` must be implemented by concrete integrators; the Core definition raises a `MethodError`.
+- `rebuild_neighbors!` is declared with no methods in Core so that other modules (e.g. `Verlet.Neighbors`) can extend it.
+- `maybe_rebuild(system::System, args...; kwargs...)` calls `rebuild_neighbors!` and returns the last positional argument, offering a lightweight helper for neighbour maintenance.
+- `stop_requested(::AbstractIntegrator)` defaults to `false` but can be overridden by stateful integrators such as conjugate-gradient minimisation.
 
-## Neighbor Types (tags)
-
-- `abstract type AbstractNeighborList end`
-  - Concrete neighbor structures live in `Neighbors` and are used by Core APIs via dispatch.
-
-## Forces and ForceField
-
-- `struct ForceField{ForcesTuple}`
-  - `layers::ForcesTuple` where each layer is a concrete potential (e.g., `LennardJones`, `Coulomb`).
-- Generic multimethod hooks:
-  - `compute_forces!(pot, sys::System)` must be implemented by each potential.
-- `compute_all_forces!(sys::System, ff::ForceField)`
-    - Resets `sys.forces` to zero element and accumulates contributions from each layer in `ff.layers`, followed by bonded `sys.specific_potentials`.
-    - Requires per-layer neighbor lists to be prepared beforehand (e.g., via `Neighbors.build_all_neighbors!`).
-  - `compute_all_forces!(sys::System)`
-    - Uses the `sys.forcefield`; throws if none is attached.
-- `compute_potential_energy(sys::System, ff::ForceField)` / `compute_potential_energy(sys::System)`
-  - Ensures neighbor information is up to date and returns the scalar potential energy from the `ForceField` layers and any bonded interactions.
-
-- `AbstractIntegrator`
-  - Marker supertype for all time integration / minimisation schemes.
-- `integrate!(integrator::AbstractIntegrator, system::System, nsteps; callback=nothing, kwargs...)`
-  - Drives the integration loop: rebuilds neighbor lists via `rebuild_neighbors!`, calls `step!(integrator, system)`, and invokes the optional callback. Callbacks receive `(system, step, integrator)` and may return `false` to halt early. The attached `ForceField` stores and maintains its own master neighbour list when pair potentials are present.
-- `step!(integrator::AbstractIntegrator, system::System)`
-  - Each concrete integrator implements one-step updates; return value is ignored.
-- `rebuild_neighbors!(system, args...; kwargs...)`
-  - Hook for neighbor maintenance. `Verlet.Neighbors` provides methods for `MasterNeighborList`.
-- `stop_requested(integrator::AbstractIntegrator)`
-  - Integrators may signal convergence/termination via this query (default `false`).
-- `potential_energy(system::System{T}, forces::Function) -> T`
-  - Expects `forces(R; return_potential=true) => (F, U)`; errors if unsupported.
-
-## Performance & Complexity
-
-- All per-particle loops are `O(N)`. Force complexity depends on neighbor list size and potential implementations.
-- `wrap_positions!` and `minimum_image` are allocation-free for `SVector` inputs.
-
-## Error Handling
-
-- `System` constructor asserts matching array sizes.
-- `potential_energy` throws if `forces` does not accept the `return_potential=true` keyword.
+## Error handling & complexity
+- `System` construction asserts consistent vector lengths; violations surface immediately.
+- Force/energy helpers fall back to informative errors when a potential lacks the required overload.
+- Core loops are `O(N)`; neighbour-related complexity is delegated to specialised modules.
 
 ## Example
-
 ```julia
-using Verlet.Core, Verlet.Integrators, StaticArrays
+using Verlet, StaticArrays
+
 box = CubicBox(10.0)
-R = [@SVector randn(3) for _ in 1:4]; wrap_positions!(R, box)
-sys = System(R, fill(@SVector zeros(3), 4), fill(@SVector zeros(3), 4), ones(4), box, ones(Int,4), Dict(1=>:A);
-           forcefield=ForceField(()))
-vv = VelocityVerlet(0.001)
+R = [SVector{3}(randn(), randn(), randn()) for _ in 1:4]; wrap_positions!(R, box)
+zeros3() = SVector{3}(0.0, 0.0, 0.0)
+
+sys = System(R, fill(zeros3(), 4), fill(zeros3(), 4), ones(4), box,
+             ones(Int, 4), Dict(1 => :A); forcefield=ForceField(()))
+
+vv = VelocityVerlet(1e-3)
 integrate!(vv, sys, 1)
 ```

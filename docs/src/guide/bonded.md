@@ -1,66 +1,57 @@
-# Bonded Potentials
+# Bonded Interactions
 
-Verlet.jl supports a variety of bonded interactions, which are forces that apply to specific groups of atoms (e.g., bonds, angles, dihedrals). These are specified by passing a tuple of interaction objects to the `System` constructor via the `specific_potentials` keyword argument.
+Bonded terms capture interactions tied to specific atom tuples—bonds, angles,
+and dihedrals. They complement pair potentials and are evaluated automatically
+once added to the `specific_potentials` tuple on a `System`.
 
-## Available Potentials
+## Available interaction types
 
-### Harmonic Bond
+- `HarmonicBond`, `HarmonicAngle`, and `PeriodicDihedral` define the parameter families for bonds, angles, and torsions.
+- `Bond`, `Angle`, and `Dihedral` bind those parameters to explicit atom indices.
 
-The harmonic bond potential is given by:
+## Example: triatomic fragment
 
-```math
-U(r) = \frac{1}{2} k (r - r_0)^2
+```@example bonded
+using StaticArrays, Verlet
+
+zero3 = SVector{3}(0.0, 0.0, 0.0)
+positions = [zero3,
+             SVector{3}(1.0, 0.0, 0.0),
+             SVector{3}(1.0, 1.0, 0.0)]
+velocities = fill(zero3, 3)
+forces = fill(zero3, 3)
+masses = ones(3)
+box = CubicBox(10.0)
+types = [1, 1, 1]
+type_names = Dict(1 => :A)
+
+bond = Bond(1, 2, HarmonicBond(200.0, 1.0))
+angle = Angle(1, 2, 3, HarmonicAngle(50.0, deg2rad(109.5)))
+
+ff = ForceField(())
+data = System(positions, velocities, forces, masses, box, types, type_names;
+              forcefield = ff, specific_potentials = (bond, angle))
+
+Verlet.Core.compute_all_forces!(data)
+(data.forces[1], data.forces[2])
 ```
 
-It is defined in `Verlet.jl` as `HarmonicBond(k, r0)`. To apply this potential to a pair of atoms, you create a `Bond` object:
+## Workflow tips
 
-```julia
-bond_potential = HarmonicBond(1000.0, 0.15) # k in kJ/mol/nm^2, r0 in nm
-bond = Bond(1, 2, bond_potential) # Applies to atoms 1 and 2
-```
+- Supply bonded terms via the `specific_potentials` keyword when constructing a
+  `System`, or mutate the tuple after construction (`sys = sys`.with etc.).
+- Combine as many interactions as required: the tuple is iterated in order, so
+  you can include custom objects that also implement `compute_forces!`.
+- Use bonded terms alongside neighbour-managed pair potentials by attaching a
+  `ForceField` and setting `specific_potentials` simultaneously.
 
-### Harmonic Angle
+## Debugging
 
-The harmonic angle potential is given by:
+- If a bonded interaction fails to converge or produces unexpected forces,
+  inspect the angle/dihedral geometry directly—ill-conditioned setups (nearly
+  colinear atoms) can amplify numerical error.
+- `compute_potential_energy(bond, system)` and friends return the contribution
+  from an individual interaction; sum them to decompose total energy.
 
-```math
-U(\theta) = \frac{1}{2} k (\theta - \theta_0)^2
-```
-
-It is defined as `HarmonicAngle(k, θ0)`. To apply it to a triplet of atoms, you create an `Angle` object:
-
-```julia
-angle_potential = HarmonicAngle(100.0, deg2rad(109.5)) # k in kJ/mol/rad^2, θ0 in radians
-angle = Angle(1, 2, 3, angle_potential) # Applies to atoms 1-2-3 (2 is central)
-```
-
-### Periodic Dihedral
-
-The periodic dihedral (or torsion) potential is given by:
-
-```math
-U(\phi) = k (1 + \cos(n\phi - \phi_0))
-```
-
-It is defined as `PeriodicDihedral(k, n, ϕ0)`. To apply it to a quadruplet of atoms, you create a `Dihedral` object:
-
-```julia
-dihedral_potential = PeriodicDihedral(10.0, 3, 0.0) # k in kJ/mol, n is integer, ϕ0 in radians
-dihedral = Dihedral(1, 2, 3, 4, dihedral_potential)
-```
-
-## Example Usage
-
-To use these in a simulation, group them into a tuple and pass them to the `System`:
-
-```julia
-bond1 = Bond(1, 2, HarmonicBond(1000.0, 0.15))
-angle1 = Angle(1, 2, 3, HarmonicAngle(100.0, deg2rad(109.5)))
-
-specific_interactions = (bond1, angle1)
-
-sys = System(
-    ...,
-    specific_potentials=specific_interactions
-)
-```
+For constrained alternatives (fixed bond lengths), see
+[Tutorial 3 · Constraints in Practice](../tutorials/constraints.md).
