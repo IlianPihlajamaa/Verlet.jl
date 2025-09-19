@@ -8,3 +8,4 @@
 - Constraints: [Verlet.Constraints](Spec_Constraints.md)
 - Thermostats: [Verlet.Thermostats](Spec_Thermostats.md)
 - Electrostatics: [Verlet.Electrostatics](Spec_Electrostatics.md)
+- Loggers: [Verlet.Loggers](Spec_Loggers.md)

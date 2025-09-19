@@ -26,3 +26,7 @@ end
 @testset "Potentials" begin
     include("test_bonded.jl")
 end
+
+@testset "Loggers" begin
+    include("test_loggers.jl")
+end

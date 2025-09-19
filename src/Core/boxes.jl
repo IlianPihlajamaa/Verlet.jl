@@ -65,3 +65,11 @@ end
 @inline function box_length(box::CubicBox)
     return box.L
 end
+
+function box_volume(box::AbstractBox, dims::Integer)
+    throw(ArgumentError("box_volume is not defined for box of type $(typeof(box))"))
+end
+
+box_volume(box::CubicBox{T}, dims::Integer) where {T<:AbstractFloat} = box.L^dims
+
+box_volume(box::AbstractBox) = box_volume(box, Dims)

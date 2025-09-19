@@ -18,9 +18,12 @@ using .Potentials
 include("Thermostats/Thermostats.jl")
 using .Thermostats
 
+include("Loggers/Loggers.jl")
+using .Loggers
+
 # Re-export from Core
 export System, natoms, natomtypes, AbstractBox, AbstractIntegrator, integrate!, VelocityVerlet, ConjugateGradient, LangevinBAOAB, LangevinBAOABConstrained, potential_energy, kinetic_energy, compute_potential_energy, maybe_rebuild
-export CubicBox, minimum_image, wrap_positions!, box_length
+export CubicBox, minimum_image, wrap_positions!, box_length, box_volume, system_volume, volume
 export T_Float, T_Int, Dims
 export NeighborPair, PotentialNeighborList, MasterNeighborList
 export AbstractPotentialPair, AbstractPairPotential, AbstractBondPotential, AbstractAnglePotential, AbstractDihedralPotential, AbstractImproperPotential
@@ -36,5 +39,13 @@ export DistanceConstraints, apply_shake!, apply_rattle!, velocity_verlet_shake_r
 
 # Re-export from Thermostats
 export degrees_of_freedom, instantaneous_temperature, velocity_rescale!
+
+# Re-export from Loggers
+export AbstractLogger, ObservableLogger, StaticCorrelationLogger, TimeCorrelationLogger
+export observe!, Observable, observed_quantity, out_type
+export data, save, step!, when_to_log, means, covars
+export DensityObservable, TemperatureObservable, KineticEnergyObservable,
+       PotentialEnergyObservable, TotalEnergyObservable, VelocityObservable,
+       ForceObservable, VolumeObservable, PressureObservable
 
 end # module Verlet

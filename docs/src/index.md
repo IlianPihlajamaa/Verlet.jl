@@ -68,6 +68,7 @@ sys.positions[1]
   support.
 - 📦 Holonomic constraints (SHAKE/RATTLE) and thermostat-aware variants.
 - 📚 First-class `StaticArrays` support for allocation-free inner loops.
+- 🧮 Observable/logging framework with built-in thermodynamic probes.
 
 Ready to dive in? Start with
 [Building Systems](guide/system.md) or jump straight to the

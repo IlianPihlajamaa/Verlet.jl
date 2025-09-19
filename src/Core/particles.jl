@@ -66,6 +66,12 @@ Get the number of unique atom types in the system.
 """
 natomtypes(sys::System) = length(sys.type_names)
 
+function system_volume(sys::System{T,IT,Dims}) where {T,IT,Dims}
+    return box_volume(sys.box, Dims)
+end
+
+volume(sys::System) = system_volume(sys)
+
 """
     kinetic_energy(sys::System) -> T
 

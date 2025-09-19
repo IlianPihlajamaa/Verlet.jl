@@ -6,7 +6,8 @@ Modules = [
     Verlet.Neighbors,
     Verlet.Potentials,
     Verlet.Constraints,
-    Verlet.Thermostats
+    Verlet.Thermostats,
+    Verlet.Loggers
 ]
 Order = [:function, :type]
 ```
@@ -18,7 +19,8 @@ Modules = [
     Verlet.Neighbors,
     Verlet.Potentials,
     Verlet.Constraints,
-    Verlet.Thermostats
+    Verlet.Thermostats,
+    Verlet.Loggers
 ]
 Order = [:module, :type, :function, :constant, :macro]
 ```

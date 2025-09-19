@@ -37,6 +37,16 @@ Purpose: Foundational particle-system types, periodic-box utilities, abstract po
 - `compute_potential_energy(sys::System)` again delegates through `sys.forcefield` with the same guard.
 - `potential_energy(system::System{T}, forces::Function) -> T` expects `forces(system.positions; return_potential=true) => (F, U)` and throws a descriptive error when the callable lacks that protocol.
 
+## Observables Interface
+
+- `abstract type Observable end`: protocol marker defined in `Verlet.Core`.
+- `observe!(obs::Observable, system::System, step::Integer)`
+  - Implementations compute the value for `step` and return it (or a reusable scratch buffer).
+  - Observables never own the persistent storage for their measurements; loggers manage retention and scheduling.
+- `observed_quantity(obs)::Symbol` -> optional helper returning canonical name.
+- `out_type(obs)::DataType` returns the type of an observation.
+- Observables are registered with loggers in `Verlet.Loggers`; Core provides only the minimal interface so observables can be authored without depending on logger implementations.
+
 ## Integration interface
 - `abstract type AbstractIntegrator end`: parent type for all integrators.
 - `integrate!(integrator::AbstractIntegrator, system::System, nsteps::Integer; callback=nothing, neighbor_kwargs...)`

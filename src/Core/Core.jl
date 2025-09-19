@@ -8,6 +8,7 @@ const Dims = 3
 
 include("boxes.jl")
 include("particles.jl")
+include("observables.jl")
 include("potential_types.jl")
 include("integrator_interface.jl")
 include("energy.jl")
@@ -15,10 +16,11 @@ include("forces.jl")
 include("neighbor_types.jl")
 
 export System, natoms, natomtypes, AbstractBox, AbstractIntegrator, integrate!, potential_energy, kinetic_energy
-export CubicBox, minimum_image, wrap_positions!, box_length
+export CubicBox, minimum_image, wrap_positions!, box_length, box_volume, system_volume, volume
 export T_Float, T_Int, Dims
 export PotentialNeighborList
 export AbstractPotential, AbstractPotentialPair, AbstractPairPotential, AbstractBondPotential, AbstractAnglePotential, AbstractDihedralPotential, AbstractImproperPotential, AbstractNeighborList
 export compute_forces!, compute_all_forces!, compute_potential_energy, ForceField, maybe_rebuild
+export Observable, observe!, observed_quantity, out_type
 
 end

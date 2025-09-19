@@ -7,7 +7,7 @@ using Verlet
 
 makedocs(
     sitename = "Verlet.jl",
-    modules = [Verlet, Verlet.Core, Verlet.Neighbors, Verlet.Potentials, Verlet.Constraints, Verlet.Thermostats],
+    modules = [Verlet, Verlet.Core, Verlet.Neighbors, Verlet.Potentials, Verlet.Constraints, Verlet.Thermostats, Verlet.Loggers],
     format = Documenter.HTML(prettyurls = get(ENV, "CI", "false") == "true"),
     checkdocs = :public,
     pages = [
@@ -17,6 +17,7 @@ makedocs(
             "Tutorial 2 · Pair Potentials & Neighbour Lists" => "tutorials/pair_potentials.md",
             "Tutorial 3 · Constraints in Practice" => "tutorials/constraints.md",
             "Tutorial 4 · Thermostatted Dynamics" => "tutorials/thermostat.md",
+            "Tutorial 5 · Observables & Loggers" => "tutorials/observables_pair_distribution.md",
         ],
         "How-to Guides" => Any[
             "Building Systems" => "guide/system.md",
@@ -35,6 +36,7 @@ makedocs(
             "Constraints" => "specs/Spec_Constraints.md",
             "Thermostats" => "specs/Spec_Thermostats.md",
             "Electrostatics" => "specs/Spec_Electrostatics.md",
+            "Loggers" => "specs/Spec_Loggers.md",
         ],
         "API Reference" => "api.md",
     ],
